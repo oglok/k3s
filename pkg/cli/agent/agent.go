@@ -3,12 +3,10 @@ package agent
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 
-	"github.com/gorilla/mux"
 	"github.com/k3s-io/k3s/pkg/agent"
 	"github.com/k3s-io/k3s/pkg/agent/https"
 	"github.com/k3s-io/k3s/pkg/cli/cmds"
@@ -20,18 +18,17 @@ import (
 	"github.com/k3s-io/k3s/pkg/signals"
 	"github.com/k3s-io/k3s/pkg/spegel"
 	"github.com/k3s-io/k3s/pkg/util"
+	"github.com/k3s-io/k3s/pkg/util/errors"
+	"github.com/k3s-io/k3s/pkg/util/logger"
+	"github.com/k3s-io/k3s/pkg/util/mux"
 	"github.com/k3s-io/k3s/pkg/util/permissions"
 	"github.com/k3s-io/k3s/pkg/version"
-	"github.com/k3s-io/k3s/pkg/vpn"
-	pkgerrors "github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
+	"k8s.io/klog/v2"
 )
 
 func Run(clx *cli.Context) (rerr error) {
-	// Validate build env
-	cmds.MustValidateGolang()
-
 	// hide process arguments from ps output, since they may contain
 	// database credentials or other secrets.
 	proctitle.SetProcTitle(os.Args[0] + " agent")
@@ -47,7 +44,8 @@ func Run(clx *cli.Context) (rerr error) {
 		return err
 	}
 
-	ctx := signals.SetupSignalContext()
+	klog.EnableContextualLogging(true)
+	ctx := logger.NewContext(signals.SetupSignalContext(), version.Program)
 	wg := &sync.WaitGroup{}
 
 	// If exiting due to an error, ensure that contexts are cancelled so that the
@@ -65,12 +63,12 @@ func Run(clx *cli.Context) (rerr error) {
 
 	if !cmds.AgentConfig.Rootless {
 		if err := permissions.IsPrivileged(); err != nil {
-			return pkgerrors.WithMessage(err, "agent requires additional privilege if not run with --rootless")
+			return errors.WithMessage(err, "agent requires additional privilege if not run with --rootless")
 		}
 	}
 
 	if cmds.AgentConfig.TokenFile != "" {
-		token, err := util.ReadFile(cmds.AgentConfig.TokenFile)
+		token, err := util.ReadFile(ctx, cmds.AgentConfig.TokenFile)
 		if err != nil {
 			return err
 		}
@@ -82,11 +80,11 @@ func Run(clx *cli.Context) (rerr error) {
 	_, err := tls.LoadX509KeyPair(clientKubeletCert, clientKubeletKey)
 
 	if err != nil && cmds.AgentConfig.Token == "" {
-		return fmt.Errorf("--token is required")
+		return errors.New("--token is required")
 	}
 
 	if cmds.AgentConfig.ServerURL == "" {
-		return fmt.Errorf("--server is required")
+		return errors.New("--server is required")
 	}
 
 	if cmds.AgentConfig.FlannelIface != "" && len(cmds.AgentConfig.NodeIP.Value()) == 0 {
@@ -109,20 +107,6 @@ func Run(clx *cli.Context) (rerr error) {
 	cfg.DataDir = dataDir
 
 	go cmds.WriteCoverage(ctx)
-	if cfg.VPNAuthFile != "" {
-		cfg.VPNAuth, err = util.ReadFile(cfg.VPNAuthFile)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Starts the VPN in the agent if config was set up
-	if cfg.VPNAuth != "" {
-		err := vpn.StartVPN(cfg.VPNAuth)
-		if err != nil {
-			return err
-		}
-	}
 
 	// Until the agent is run and retrieves config from the server, we won't know
 	// if the embedded registry is enabled. If it is not enabled, these are not
@@ -145,9 +129,5 @@ func Run(clx *cli.Context) (rerr error) {
 		return https.Start(ctx, nodeConfig, nil)
 	}
 
-	if err := agent.Run(ctx, wg, cfg); err != nil {
-		return err
-	}
-
-	return nil
+	return agent.Run(ctx, wg, cfg)
 }

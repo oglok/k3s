@@ -37,7 +37,7 @@ func Test_UnitUntrustedCA(t *testing.T) {
 		BaseURL:  server.URL,
 		Username: defaultUsername,
 		Password: defaultPassword,
-		caHash:   digest,
+		CAHash:   digest,
 	}
 
 	testCases := []struct {
@@ -119,29 +119,33 @@ func Test_UnitInvalidTokens(t *testing.T) {
 	assert := assert.New(t)
 	server := newTLSServer(t, defaultUsername, defaultPassword, false)
 	defer server.Close()
-	digest, _ := hashCA(getServerCA(server))
+	cacerts := getServerCA(server)
+	digest, _ := hashCA(cacerts)
 
 	testCases := []struct {
 		server   string
 		token    string
 		expected string
+		options  []ValidationOption
 	}{
-		{server.URL, "", "token must not be empty"},
-		{server.URL, "K10::", "invalid token format"},
-		{server.URL, "K10::x", "invalid token format"},
-		{server.URL, "K10::x:", "invalid token format"},
-		{server.URL, "K10XX::x:y", "invalid token CA hash length"},
+		{server.URL, "", "token must not be empty", nil},
+		{server.URL, "K10::", "invalid token format", nil},
+		{server.URL, "K10::x", "invalid token format", nil},
+		{server.URL, "K10::x:", "invalid token format", nil},
+		{server.URL, "K10XX::x:y", "invalid token CA hash length", nil},
 		{server.URL,
 			"K10XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX::x:y",
-			"token CA hash does not match the Cluster CA certificate hash: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX != " + digest},
+			"token CA hash does not match the Cluster CA certificate hash: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX != " + digest,
+			[]ValidationOption{func(info *Info) { info.CACerts = cacerts }}},
 	}
 
 	for _, testCase := range testCases {
-		info, err := ParseAndValidateToken(testCase.server, testCase.token)
+		info, err := ParseAndValidateToken(testCase.server, testCase.token, testCase.options...)
 		assert.EqualError(err, testCase.expected, testCase)
 		assert.Nil(info, testCase)
 
-		info, err = ParseAndValidateToken(testCase.server, testCase.token, WithUser(defaultUsername))
+		options := append(testCase.options, WithUser(defaultUsername))
+		info, err = ParseAndValidateToken(testCase.server, testCase.token, options...)
 		assert.EqualError(err, testCase.expected, testCase)
 		assert.Nil(info, testCase)
 	}
@@ -159,7 +163,7 @@ func Test_UnitInvalidCredentials(t *testing.T) {
 		BaseURL:  server.URL,
 		Username: "nobody",
 		Password: "invalid",
-		caHash:   digest,
+		CAHash:   digest,
 	}
 
 	testCases := []string{
@@ -296,7 +300,7 @@ func newTLSServer(t *testing.T, username, password string, sendWrongCA bool) *ht
 	var server *httptest.Server
 	server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1-k3s/server-bootstrap" {
-			if authUsername, authPassword, ok := r.BasicAuth(); ok != true || authPassword != password || authUsername != username {
+			if authUsername, authPassword, ok := r.BasicAuth(); !ok || authPassword != password || authUsername != username {
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 				return
 			}

@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	helmchart "github.com/k3s-io/helm-controller/pkg/controllers/chart"
-	helmcommon "github.com/k3s-io/helm-controller/pkg/controllers/common"
 	"github.com/k3s-io/k3s/pkg/cli/cmds"
 	"github.com/k3s-io/k3s/pkg/clientaccess"
 	"github.com/k3s-io/k3s/pkg/daemons/config"
@@ -27,13 +25,17 @@ import (
 	"github.com/k3s-io/k3s/pkg/server/handlers"
 	"github.com/k3s-io/k3s/pkg/static"
 	"github.com/k3s-io/k3s/pkg/util"
+	"github.com/k3s-io/k3s/pkg/util/errors"
+	"github.com/k3s-io/k3s/pkg/util/home"
+	"github.com/k3s-io/k3s/pkg/util/logger"
 	"github.com/k3s-io/k3s/pkg/util/permissions"
 	"github.com/k3s-io/k3s/pkg/version"
-	pkgerrors "github.com/pkg/errors"
+
+	helmchart "github.com/k3s-io/helm-controller/pkg/controllers/chart"
+	helmcommon "github.com/k3s-io/helm-controller/pkg/controllers/common"
 	"github.com/rancher/wrangler/v3/pkg/apply"
 	v1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/v3/pkg/leader"
-	"github.com/rancher/wrangler/v3/pkg/resolvehome"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -72,7 +74,7 @@ func PrepareServer(ctx context.Context, wg *sync.WaitGroup, config *Config, cfg 
 // and writes the admin kubeconfig.
 func StartServer(ctx context.Context, wg *sync.WaitGroup, config *Config, cfg *cmds.Server) error {
 	if err := control.Server(ctx, wg, &config.ControlConfig); err != nil {
-		return pkgerrors.WithMessage(err, "starting kubernetes")
+		return errors.WithMessage(err, "starting kubernetes")
 	}
 
 	shArgs := cmds.StartupHookArgs{
@@ -83,7 +85,7 @@ func StartServer(ctx context.Context, wg *sync.WaitGroup, config *Config, cfg *c
 	}
 	for _, hook := range config.StartupHooks {
 		if err := hook(ctx, config.ControlConfig.Runtime.StartupHooksWg, shArgs); err != nil {
-			return pkgerrors.WithMessage(err, "startup hook")
+			return errors.WithMessage(err, "startup hook")
 		}
 	}
 	go startOnAPIServerReady(ctx, config)
@@ -111,17 +113,17 @@ func runControllers(ctx context.Context, config *Config) error {
 
 	sc, err := NewContext(ctx, config)
 	if err != nil {
-		return pkgerrors.WithMessage(err, "failed to create new server context")
+		return errors.WithMessage(err, "failed to create new server context")
 	}
 
 	controlConfig.Runtime.StartupHooksWg.Wait()
 	if err := stageFiles(ctx, sc, controlConfig); err != nil {
-		return pkgerrors.WithMessage(err, "failed to stage files")
+		return errors.WithMessage(err, "failed to stage files")
 	}
 
 	// start the nodepassword controller before we set controlConfig.Runtime.Core
 	if err := nodepassword.Register(ctx, sc.K8s, sc.Core.Core().V1().Secret(), sc.Core.Core().V1().Node()); err != nil {
-		return pkgerrors.WithMessage(err, "failed to start node-password secret controller")
+		return errors.WithMessage(err, "failed to start node-password secret controller")
 	}
 
 	controlConfig.Runtime.K8s = sc.K8s
@@ -142,12 +144,12 @@ func runControllers(ctx context.Context, config *Config) error {
 
 	for _, controller := range config.Controllers {
 		if err := controller(ctx, sc); err != nil {
-			return pkgerrors.WithMessagef(err, "failed to start %s controller", util.GetFunctionName(controller))
+			return errors.WithMessagef(err, "failed to start %s controller", util.GetFunctionName(controller))
 		}
 	}
 
 	if err := sc.Start(ctx); err != nil {
-		return pkgerrors.WithMessage(err, "failed to start wranger controllers")
+		return errors.WithMessage(err, "failed to start wranger controllers")
 	}
 
 	if !controlConfig.DisableAPIServer {
@@ -173,7 +175,7 @@ func runControllers(ctx context.Context, config *Config) error {
 	return nil
 }
 
-// apiServerControllers starts the core controllers, as well as the leader-elected controllers
+// apiserverControllers starts the core controllers, as well as the leader-elected controllers
 // that should only run on a control-plane node.
 func apiserverControllers(ctx context.Context, sc *Context, config *Config) {
 	if err := coreControllers(ctx, sc, config); err != nil {
@@ -181,14 +183,14 @@ func apiserverControllers(ctx context.Context, sc *Context, config *Config) {
 	}
 	for _, controller := range config.LeaderControllers {
 		if err := controller(ctx, sc); err != nil {
-			panic(pkgerrors.WithMessagef(err, "failed to start %s leader controller", util.GetFunctionName(controller)))
+			panic(errors.WithMessagef(err, "failed to start %s leader controller", util.GetFunctionName(controller)))
 		}
 	}
 
 	// Re-run informer factory startup after core and leader-elected controllers have started.
 	// Additional caches may need to start for the newly added OnChange/OnRemove callbacks.
 	if err := sc.Start(ctx); err != nil {
-		panic(pkgerrors.WithMessage(err, "failed to start wranger controllers"))
+		panic(errors.WithMessage(err, "failed to start wranger controllers"))
 	}
 }
 
@@ -218,14 +220,6 @@ func coreControllers(ctx context.Context, sc *Context, config *Config) error {
 		return err
 	}
 
-	// Apply SystemDefaultRegistry setting to Helm before starting controllers.
-	// Internally helm-controller defaults to latest tag, but we inject a immutable version at build time.
-	if config.ControlConfig.HelmJobImage != "" {
-		helmchart.DefaultJobImage = config.ControlConfig.HelmJobImage
-	} else if config.ControlConfig.SystemDefaultRegistry != "" {
-		helmchart.DefaultJobImage = config.ControlConfig.SystemDefaultRegistry + "/" + helmchart.DefaultJobImage
-	}
-
 	if sc.Helm != nil {
 		restConfig, err := util.GetRESTConfig(config.ControlConfig.Runtime.KubeConfigSupervisor)
 		if err != nil {
@@ -238,6 +232,7 @@ func coreControllers(ctx context.Context, sc *Context, config *Config) error {
 			return err
 		}
 
+		ctx := logger.NewContext(ctx, "helm-controller")
 		apply := apply.New(k8s, apply.NewClientFactory(restConfig)).WithDynamicLookup().WithSetOwnerReference(false, false)
 		helm := sc.Helm.WithAgent(restConfig.UserAgent)
 		batch := sc.Batch.WithAgent(restConfig.UserAgent)
@@ -248,20 +243,12 @@ func coreControllers(ctx context.Context, sc *Context, config *Config) error {
 			helmcommon.Name,
 			"cluster-admin",
 			strconv.Itoa(config.ControlConfig.HTTPSPort),
-			k8s,
 			apply,
-			util.BuildControllerEventRecorder(k8s, helmcommon.Name, metav1.NamespaceAll),
-			helm.V1().HelmChart(),
-			helm.V1().HelmChart().Cache(),
-			helm.V1().HelmChartConfig(),
-			helm.V1().HelmChartConfig().Cache(),
-			batch.V1().Job(),
-			batch.V1().Job().Cache(),
-			auth.V1().ClusterRoleBinding(),
-			core.V1().ServiceAccount(),
-			core.V1().ConfigMap(),
-			core.V1().Secret(),
-			core.V1().Secret().Cache())
+			util.BuildControllerEventRecorder(ctx, k8s, helmcommon.Name, metav1.NamespaceAll),
+			batch.V1(),
+			core.V1(),
+			helm.V1(),
+			auth.V1())
 	}
 
 	if config.ControlConfig.Rootless {
@@ -352,14 +339,14 @@ func HomeKubeConfig(write, rootless bool) (string, error) {
 		if permissions.IsPrivileged() == nil && !rootless {
 			return datadir.GlobalConfig, nil
 		}
-		return resolvehome.Resolve(datadir.HomeConfig)
+		return home.Resolve(datadir.HomeConfig)
 	}
 
 	if _, err := os.Stat(datadir.GlobalConfig); err == nil {
 		return datadir.GlobalConfig, nil
 	}
 
-	return resolvehome.Resolve(datadir.HomeConfig)
+	return home.Resolve(datadir.HomeConfig)
 }
 
 func printTokens(config *config.Control) error {
@@ -444,7 +431,7 @@ func writeKubeConfig(certs string, config *Config) error {
 		}
 	}
 
-	if err = clientaccess.WriteClientKubeConfig(kubeConfig, url, config.ControlConfig.Runtime.ServerCA, config.ControlConfig.Runtime.ClientAdminCert,
+	if err = clientaccess.WriteClientKubeConfig(kubeConfig, config.ControlConfig.KubeConfigName, url, config.ControlConfig.Runtime.ServerCA, config.ControlConfig.Runtime.ClientAdminCert,
 		config.ControlConfig.Runtime.ClientAdminKey); err == nil {
 		logrus.Infof("Wrote kubeconfig %s", kubeConfig)
 	} else {
@@ -496,11 +483,11 @@ func setupDataDirAndChdir(config *config.Control) error {
 	dataDir := config.DataDir
 
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
-		return pkgerrors.WithMessagef(err, "can not mkdir %s", dataDir)
+		return errors.WithMessagef(err, "can not mkdir %s", dataDir)
 	}
 
 	if err := os.Chdir(dataDir); err != nil {
-		return pkgerrors.WithMessagef(err, "can not chdir %s", dataDir)
+		return errors.WithMessagef(err, "can not chdir %s", dataDir)
 	}
 
 	return nil

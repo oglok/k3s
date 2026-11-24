@@ -26,7 +26,7 @@ var _ = Describe("Hardened Tests", Ordered, func() {
 	Context("Setup Cluster", func() {
 		It("should provision servers and agents", func() {
 			var err error
-			config, err = docker.NewTestConfig("rancher/systemd-node")
+			config, err = docker.NewTestConfig(GinkgoTB(), "ghcr.io/rancher/systemd-node:v0.0.9")
 			Expect(err).NotTo(HaveOccurred())
 			config.ServerYaml = `
 secrets-encryption: true
@@ -38,7 +38,7 @@ kubelet-arg:
   - 'event-qps=0'
   - "tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
 kube-apiserver-arg:
-  - 'admission-control-config-file=/tmp/cluster-level-pss.yaml'
+  - 'admission-control-config-file=/home/cluster-level-pss.yaml'
   - 'audit-log-path=/var/lib/rancher/k3s/server/logs/audit.log'
   - 'audit-policy-file=/var/lib/rancher/k3s/server/audit.yaml'
   - 'audit-log-maxage=30'
@@ -54,7 +54,7 @@ kubelet-arg:
 			Expect(config.ProvisionServers(1)).To(Succeed())
 
 			for _, server := range config.Servers {
-				cmd := "docker cp ./cluster-level-pss.yaml " + server.Name + ":/tmp/cluster-level-pss.yaml"
+				cmd := "docker cp ./cluster-level-pss.yaml " + server.Name + ":/home/cluster-level-pss.yaml"
 				Expect(tests.RunCommand(cmd)).Error().NotTo(HaveOccurred())
 
 				cmd = "mkdir -p /var/lib/rancher/k3s/server/logs"
@@ -80,10 +80,9 @@ kubelet-arg:
 		It("applies network policies", func() {
 			_, err := config.DeployWorkload("hardened-ingress.yaml")
 			Expect(err).NotTo(HaveOccurred())
-			Eventually(func() (string, error) {
-				cmd := "kubectl get daemonset -n default example -o jsonpath='{.status.numberReady}'"
-				return tests.RunCommand(cmd)
-			}, "60s", "5s").Should(Equal("2"))
+			Eventually(func() (int, error) {
+				return tests.GetDaemonsetReady("example", config.KubeconfigFile)
+			}, "60s", "5s").Should(Equal(2))
 			_, err = config.DeployWorkload("hardened-netpool.yaml")
 			Expect(err).NotTo(HaveOccurred())
 		})

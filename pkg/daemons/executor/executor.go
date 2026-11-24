@@ -28,6 +28,7 @@ var (
 // The enableMaintenance flag enables attempts to perform corrective maintenance during the test process.
 type TestFunc func(ctx context.Context, enableMaintenance bool) error
 
+// Executor is a set of functions for bootstrapping a node and starting the CRI, CNI, and Kubernetes components
 type Executor interface {
 	Bootstrap(ctx context.Context, nodeConfig *daemonconfig.Node, cfg cmds.Agent) error
 	Kubelet(ctx context.Context, args []string) error
@@ -54,6 +55,7 @@ type ETCDSocketOpts struct {
 	ReusePort    bool `json:"reuse-port,omitempty"`
 }
 
+//revive:disable:struct-tag
 type ETCDConfig struct {
 	InitialOptions       `json:",inline"`
 	Name                 string         `json:"name,omitempty"`
@@ -75,6 +77,8 @@ type ETCDConfig struct {
 
 	ExperimentalInitialCorruptCheck         bool          `json:"experimental-initial-corrupt-check"`
 	ExperimentalWatchProgressNotifyInterval time.Duration `json:"experimental-watch-progress-notify-interval"`
+
+	BootstrapDefragThresholdMegabytes uint `json:"bootstrap-defrag-threshold-megabytes,omitempty"`
 }
 
 type ServerTrust struct {
@@ -105,7 +109,7 @@ func (e ETCDConfig) ToConfigFile(extraArgs []string) (string, error) {
 	}
 
 	if len(extraArgs) > 0 {
-		var s map[string]interface{}
+		var s map[string]any
 		if err := yaml2.Unmarshal(bytes, &s); err != nil {
 			return "", err
 		}
@@ -152,6 +156,10 @@ func (e ETCDConfig) ToConfigFile(extraArgs []string) (string, error) {
 
 func Set(driver Executor) {
 	executor = driver
+}
+
+func Get() Executor {
+	return executor
 }
 
 func Bootstrap(ctx context.Context, nodeConfig *daemonconfig.Node, cfg cmds.Agent) error {

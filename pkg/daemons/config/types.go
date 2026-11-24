@@ -95,6 +95,7 @@ type CRIDockerd struct {
 
 type Flannel struct {
 	Backend      string
+	BackendEnv   []string
 	CNIConfFile  string
 	ConfFile     string
 	ConfOverride bool
@@ -182,6 +183,7 @@ type CriticalControlArgs struct {
 	EncryptProvider       string       `cli:"secrets-encryption-provider"`
 	EmbeddedRegistry      bool         `cli:"embedded-registry"`
 	FlannelBackend        string       `cli:"flannel-backend"`
+	FlannelBackendEnv     []string
 	FlannelIPv6Masq       bool         `cli:"flannel-ipv6-masq"`
 	FlannelExternalIP     bool         `cli:"flannel-external-ip"`
 	EgressSelectorMode    string       `cli:"egress-selector-mode"`
@@ -207,6 +209,7 @@ type Control struct {
 	KubeConfigOutput         string
 	KubeConfigMode           string
 	KubeConfigGroup          string
+	KubeConfigName           string
 	HelmJobImage             string
 	DataDir                  string
 	KineTLS                  bool
@@ -225,7 +228,8 @@ type Control struct {
 	ExtraControllerArgs      []string
 	ExtraCloudControllerArgs []string
 	ExtraEtcdArgs            []string
-	ExtraSchedulerAPIArgs    []string
+	ExtraSchedulerArgs       []string
+	ExtraHelmArgs            []string
 	NoLeaderElect            bool
 	JoinURL                  string
 	IPSECPSK                 string
@@ -243,6 +247,7 @@ type Control struct {
 	EtcdDisableSnapshots     bool            `json:"-"`
 	EtcdExposeMetrics        bool            `json:"-"`
 	EtcdSnapshotDir          string          `json:"-"`
+	EtcdSnapshotRestrictions []string        `json:"-"`
 	EtcdSnapshotCron         string          `json:"-"`
 	EtcdSnapshotReconcile    metav1.Duration `json:"-"`
 	EtcdSnapshotRetention    int             `json:"-"`

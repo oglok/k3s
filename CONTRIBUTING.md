@@ -14,6 +14,34 @@ If you're interested in contributing documentation, please note the following:
 
 If you're interested in contributing new tests, please see the [TESTING.md](./tests/TESTING.md).
 
+## AI Guidance
+
+When using AI tools to help prepare an issue, use the applicable [issue template](.github/ISSUE_TEMPLATE)
+and limit generated content to the information requested by that template.
+
+Using AI tools to help write your PR is acceptable, but as the author, you are responsible for
+understanding every change. If you used AI tools in preparing your PR, you must disclose this in the
+description of your PR. Listing AI tooling as a co-author, co-signing commits using an AI tool, or using
+the `assisted-by`, `co-developed` or similar commit trailer is not allowed.
+
+Be considerate of maintainer resources. Large AI generated PRs, commit messages, and issue
+reports are not allowed. Issues with excessive AI prose ("Why it matters" sections and lengthy
+contrived steps to reproduce) may be ignored or rejected.
+
+PRs may be rejected solely due to inappropriate addition of tests. Test should not be:
+* Excessively trivial (ie, validates that input=output, or covers only 3rd party code)
+* Replaceable by a succinct E2E test
+* Unnecessarily scaffolded
+* Excessively large
+
+Do not leave the first review of AI generated changes to the reviewers. Verify the changes (code review,
+testing, etc.) before submitting your PR. Reviewers may ask questions about your AI-assisted code, and if
+you cannot explain why a change was made, the PR will be closed.
+
+When responding to review comments, you must do so without relying on AI tools. Reviewers want to engage
+directly with you, not with generated responses. If you do not engage directly with reviewers, the PR will
+be closed.
+
 ## Code Convention
 
 See the [code conventions documentation](./docs/contrib/code_conventions.md) for more information on how to write code for K3s.
@@ -38,12 +66,61 @@ Generally, pull requests need two approvals from maintainers to be merged. One e
 
 When addressing review feedback, it is helpful to the reviewer if additional changes are made in new commits. This allows the reviewer to easily see the delta between what they previously reviewed and the changes you added to address their feedback.
 
-Once a PR has the necessary approvals, it can be merged. Here’s how the merge should be handled:
-- If the PR is a single logical commit, the merger should use the “Rebase and merge” option. This keeps the git commit history very clean and simple and eliminates noise from "merge commits."
-- If the PR is more than one logical commit, the merger should use the “Create a merge commit” option.
+Once a PR has the necessary approvals, it can be merged. Here's how the merge should be handled:
+- If the PR is a single logical commit, the merger should use the "Rebase and merge" option. This keeps the git commit history very clean and simple and eliminates noise from "merge commits."
+- If the PR is more than one logical commit, the merger should use the "Create a merge commit" option.
 - If the PR consists of more than one commit because the author added commits to address feedback, the commits should be squashed into a single commit (or more than one logical commit, if it is a big feature that needs more commits). This can be achieved in one of two ways:
-  - The merger can use the “Squash and merge” option. If they do this, the merger is responsible for cleaning up the commit message according to the previously stated commit message guidance.
+  - The merger can use the "Squash and merge" option. If they do this, the merger is responsible for cleaning up the commit message according to the previously stated commit message guidance.
   - The pull request author, after getting the requisite approvals, can reorganize the commits as they see fit (using, for example, git rebase -i) and re-push.
+
+## Development Workflow
+To get started with the code, you'll want to follow the standard GitHub fork-and-pull-request workflow.
+
+1. Fork the repository
+Start by forking the K3s repository to your own GitHub account. Once forked, clone it locally:
+
+```bash
+git clone https://github.com/<your-username>/k3s.git
+cd k3s
+```
+It is also a good idea to add the upstream repository as a remote so you can stay up to date:
+```bash
+git remote add upstream https://github.com/k3s-io/k3s.git
+```
+
+2. Create a branch
+Always create a new branch for your work. This keeps your master branch clean and makes it much easier to manage multiple contributions. Pick a descriptive name that relates to the issue you are solving:
+
+```bash
+git checkout -b feat/my-new-feature
+# OR
+git checkout -b fix/issue-number-description
+```
+
+3. Make your changes and commit
+As you work, remember the golden rule mentioned later: one logical unit per commit. When you are ready to commit, don't forget the -s flag to sign off on the DCO as explained in the ([Developer Certificate Of Origin](#developer-certificate-of-origin)) section:
+
+```bash
+git add .
+git commit -s -m "Your descriptive title here"
+```
+
+4. Push and open a PR
+Once your changes are ready and you've verified them (and perhaps run make format), push your branch to your fork:
+
+```bash
+git push origin feat/my-new-feature
+```
+
+After pushing, head over to the K3s Pull Requests page. GitHub should proactively show a prompt to "Compare & pull request" for your recently pushed branch. Follow the PR template to provide the necessary details.
+
+If you would like to test your changes locally, you should first build. Check our [BUILDING.md](BUILDING.md) file for instructions about how to build K3s. Once built, you can find the K3s binary in dist/artifacts.
+
+To leverage the built binary to set up a cluster, copy the K3s binary to "/usr/local/bin/k3s" and use the K3s script command with INSTALL_K3S_SKIP_DOWNLOAD:
+```
+curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_DOWNLOAD=true sh -
+```
+
 
 ## Developer Certificate Of Origin ##
 
@@ -60,7 +137,6 @@ Signed-off-by: Jane Smith <jane.smith@example.com>
 
 In most cases, you can add this signoff to your commit automatically with the
 `-s` flag to `git commit`. Please use your real name and a reachable email address.
-
 
 ## Golangci-lint ##
 

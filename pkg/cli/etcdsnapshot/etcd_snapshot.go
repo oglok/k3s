@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,8 +20,7 @@ import (
 	"github.com/k3s-io/k3s/pkg/etcd"
 	"github.com/k3s-io/k3s/pkg/proctitle"
 	"github.com/k3s-io/k3s/pkg/server"
-	util2 "github.com/k3s-io/k3s/pkg/util"
-	pkgerrors "github.com/pkg/errors"
+	"github.com/k3s-io/k3s/pkg/util/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,8 +48,12 @@ func commandSetup(app *cli.Context, cfg *cmds.Server) (*etcd.SnapshotRequest, *c
 	if app.IsSet("etcd-snapshot-retention") {
 		sr.Retention = &cfg.EtcdSnapshotRetention
 	}
-
 	if cfg.EtcdS3 {
+		// set default s3 retention from local snapshot retention
+		// preserves legacy behavior of local snapshot retention also affecting s3
+		if !app.IsSet("etcd-s3-retention") && app.IsSet("etcd-snapshot-retention") {
+			cfg.EtcdS3Retention = cfg.EtcdSnapshotRetention
+		}
 		sr.S3 = &config.EtcdS3{
 			AccessKey:     cfg.EtcdS3AccessKey,
 			Bucket:        cfg.EtcdS3BucketName,
@@ -95,7 +97,7 @@ func wrapServerError(err error) error {
 		// since the operation may have actualy succeeded despite the client timing out the request.
 		return err
 	}
-	return pkgerrors.WithMessage(err, "see server log for details")
+	return errors.WithMessage(err, "see server log for details")
 }
 
 // Save triggers an on-demand etcd snapshot operation
@@ -108,7 +110,7 @@ func Save(app *cli.Context) error {
 
 func save(app *cli.Context, cfg *cmds.Server) error {
 	if app.Args().Len() > 0 {
-		return util2.ErrCommandNoArgs
+		return errors.ErrCommandNoArgs
 	}
 
 	// Save always sets retention to 0 to disable automatic pruning.
@@ -147,10 +149,10 @@ func Delete(app *cli.Context) error {
 	if err := cmds.InitLogging(); err != nil {
 		return err
 	}
-	return delete(app, &cmds.ServerConfig)
+	return deleteSnapshot(app, &cmds.ServerConfig)
 }
 
-func delete(app *cli.Context, cfg *cmds.Server) error {
+func deleteSnapshot(app *cli.Context, cfg *cmds.Server) error {
 	snapshots := app.Args()
 	if snapshots.Len() == 0 {
 		return errors.New("no snapshots given for removal")

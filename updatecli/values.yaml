@@ -3,10 +3,15 @@ github:
   email: "41898282+github-actions[bot]@users.noreply.github.com"
   username: "UPDATECLI_GITHUB_ACTOR"
   token: "UPDATECLI_GITHUB_TOKEN"
+  branch: "TARGET_BRANCH"
+  repo: "TARGET_REPO"
+  org: "TARGET_ORG"
 k3s:
   org: "k3s-io"
   repo: "k3s"
-  branch: "main"
+flannel:
+  org: "flannel-io"
+  repo: "flannel"
 klipper_helm:
   org: "k3s-io"
   repo: "klipper-helm"
@@ -23,3 +28,4 @@ helm_controller:
   org: "k3s-io"
   repo: "helm-controller"
   branch: "master"
+  version_pattern: "HELM_CONTROLLER_VERSION_PATTERN"
