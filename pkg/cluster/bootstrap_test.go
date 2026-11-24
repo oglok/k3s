@@ -14,7 +14,7 @@ import (
 	"github.com/k3s-io/k3s/pkg/daemons/config"
 )
 
-func Test_isDirEmpty(t *testing.T) {
+func Test_UnitisDirEmpty(t *testing.T) {
 	const tmpDir = "test_dir"
 
 	type args struct {
@@ -78,7 +78,7 @@ func Test_isDirEmpty(t *testing.T) {
 	}
 }
 
-func TestCluster_certDirsExist(t *testing.T) {
+func TestCluster_UnitcheckCertrtDirs(t *testing.T) {
 	const testDataDir = "/tmp/k3s/"
 
 	testCredDir := filepath.Join(testDataDir, "server", "cred")
@@ -134,17 +134,17 @@ func TestCluster_certDirsExist(t *testing.T) {
 			}
 			defer tt.teardown()
 			if err := tt.setup(); err != nil {
-				t.Errorf("Setup for Cluster.certDirsExist() failed = %v", err)
+				t.Errorf("Setup for Cluster.checkCertDirs() failed = %v", err)
 				return
 			}
-			if err := c.certDirsExist(); (err != nil) != tt.wantErr {
-				t.Errorf("Cluster.certDirsExist() error = %v, wantErr %v", err, tt.wantErr)
+			if err := c.checkCertDirs(); (err != nil) != tt.wantErr {
+				t.Errorf("Cluster.checkCertDirs() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestCluster_migrateBootstrapData(t *testing.T) {
+func TestCluster_UnitmigrateBootstrapData(t *testing.T) {
 	type fields struct {
 		clientAccessInfo *clientaccess.Info
 		config           *config.Control

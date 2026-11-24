@@ -1,11 +1,9 @@
 //go:build !no_embedded_executor
-// +build !no_embedded_executor
 
 package embed
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -28,11 +26,13 @@ import (
 	"github.com/k3s-io/k3s/pkg/executor/embed/etcd"
 	"github.com/k3s-io/k3s/pkg/signals"
 	"github.com/k3s-io/k3s/pkg/util"
+	"github.com/k3s-io/k3s/pkg/util/errors"
 	"github.com/k3s-io/k3s/pkg/version"
 	"github.com/k3s-io/k3s/pkg/vpn"
-	pkgerrors "github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"github.com/urfave/cli/v2"
 	"k8s.io/apiserver/pkg/authentication/authenticator"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	cloudprovider "k8s.io/cloud-provider"
 	ccmapp "k8s.io/cloud-provider/app"
 	cloudcontrollerconfig "k8s.io/cloud-provider/app/config"
@@ -53,18 +53,85 @@ import (
 
 var once sync.Once
 
-func init() {
-	executor.Set(&Embedded{})
-}
-
 // explicit type check
 var _ executor.Executor = &Embedded{}
+var _ vpn.InfoProvider = &Embedded{}
 
 type Embedded struct {
 	apiServerReady <-chan struct{}
 	etcdReady      chan struct{}
 	criReady       chan struct{}
 	nodeConfig     *daemonconfig.Node
+	vpnInfo        *vpn.Info
+}
+
+// New creates a new embeded executor from the provided agent CLI config.
+// Optional components like VPN may modify settings provided by the CLI.
+func New(ctx context.Context, cfg *cmds.Agent) (*Embedded, error) {
+	// If there is a VPN, we must start it early to overwrite NodeIP and flannel interface
+	var vpnInfo *vpn.Info
+	var err error
+
+	if cfg.VPNAuthFile != "" {
+		cfg.VPNAuth, err = util.ReadFile(ctx, cfg.VPNAuthFile)
+		if err != nil {
+			return nil, errors.WithMessage(err, "failed to read vpn-auth-file")
+		}
+	}
+
+	if cfg.VPNAuth != "" {
+		err = vpn.StartVPN(cfg.VPNAuth)
+		if err != nil {
+			return nil, err
+		}
+
+		vpnInfo, err = vpn.GetInfo(cfg.VPNAuth)
+		if err != nil {
+			return nil, err
+		}
+
+		// Pass ipv4, ipv6 or both depending on nodeIPs mode
+		_, nodeIPs, err := util.GetHostnameAndIPs(ctx, cfg.NodeName, util.SplitStringSlice(cfg.NodeIP.Value()))
+		if err != nil {
+			return nil, err
+		}
+
+		var vpnIPs []net.IP
+		if utilsnet.IsIPv4(nodeIPs[0]) && vpnInfo.IPv4Address != nil {
+			vpnIPs = append(vpnIPs, vpnInfo.IPv4Address)
+			if vpnInfo.IPv6Address != nil {
+				vpnIPs = append(vpnIPs, vpnInfo.IPv6Address)
+			}
+		} else if utilsnet.IsIPv6(nodeIPs[0]) && vpnInfo.IPv6Address != nil {
+			vpnIPs = append(vpnIPs, vpnInfo.IPv6Address)
+			if vpnInfo.IPv4Address != nil {
+				vpnIPs = append(vpnIPs, vpnInfo.IPv4Address)
+			}
+		} else {
+			return nil, fmt.Errorf("address family mismatch when assigning VPN addresses to node: node=%v, VPN ipv4=%v ipv6=%v", nodeIPs, vpnInfo.IPv4Address, vpnInfo.IPv6Address)
+		}
+
+		// Overwrite nodeip and flannel interface and throw a warning if user explicitly set those parameters
+		if len(vpnIPs) != 0 {
+			logrus.Infof("Node-ip changed to %v due to VPN", vpnIPs)
+			if len(cfg.NodeIP.Value()) != 0 {
+				logrus.Warn("VPN provider overrides configured node-ip parameter")
+			}
+			if len(cfg.NodeExternalIP.Value()) != 0 {
+				logrus.Warn("VPN provider overrides node-external-ip parameter")
+			}
+
+			// There is no way to clear the backing slice for the StringSlice
+			// so we have to recreate it and rebind it to the flag.
+			cfg.NodeIP = cli.StringSlice{}
+			cmds.NodeIPFlag.Destination = &cfg.NodeIP
+			for _, ip := range vpnIPs {
+				cfg.NodeIP.Set(ip.String())
+			}
+			cfg.FlannelIface = vpnInfo.Interface
+		}
+	}
+	return &Embedded{vpnInfo: vpnInfo}, nil
 }
 
 func (e *Embedded) Bootstrap(ctx context.Context, nodeConfig *daemonconfig.Node, cfg cmds.Agent) error {
@@ -98,56 +165,14 @@ func (e *Embedded) Bootstrap(ctx context.Context, nodeConfig *daemonconfig.Node,
 		if len(cfg.FlannelIface) > 0 {
 			nodeConfig.Flannel.Iface, err = net.InterfaceByName(cfg.FlannelIface)
 			if err != nil {
-				return pkgerrors.WithMessagef(err, "unable to find interface %s", cfg.FlannelIface)
-			}
-		}
-
-		// If there is a VPN, we must overwrite NodeIP and flannel interface
-		var vpnInfo vpn.VPNInfo
-		if cfg.VPNAuth != "" {
-			vpnInfo, err = vpn.GetVPNInfo(cfg.VPNAuth)
-			if err != nil {
-				return err
-			}
-
-			// Pass ipv4, ipv6 or both depending on nodeIPs mode
-			nodeIPs := nodeConfig.AgentConfig.NodeIPs
-			var vpnIPs []net.IP
-			if utilsnet.IsIPv4(nodeIPs[0]) && vpnInfo.IPv4Address != nil {
-				vpnIPs = append(vpnIPs, vpnInfo.IPv4Address)
-				if vpnInfo.IPv6Address != nil {
-					vpnIPs = append(vpnIPs, vpnInfo.IPv6Address)
-				}
-			} else if utilsnet.IsIPv6(nodeIPs[0]) && vpnInfo.IPv6Address != nil {
-				vpnIPs = append(vpnIPs, vpnInfo.IPv6Address)
-				if vpnInfo.IPv4Address != nil {
-					vpnIPs = append(vpnIPs, vpnInfo.IPv4Address)
-				}
-			} else {
-				return fmt.Errorf("address family mismatch when assigning VPN addresses to node: node=%v, VPN ipv4=%v ipv6=%v", nodeIPs, vpnInfo.IPv4Address, vpnInfo.IPv6Address)
-			}
-
-			// Overwrite nodeip and flannel interface and throw a warning if user explicitly set those parameters
-			if len(vpnIPs) != 0 {
-				logrus.Infof("Node-ip changed to %v due to VPN", vpnIPs)
-				if len(cfg.NodeIP.Value()) != 0 {
-					logrus.Warn("VPN provider overrides configured node-ip parameter")
-				}
-				if len(cfg.NodeExternalIP.Value()) != 0 {
-					logrus.Warn("VPN provider overrides node-external-ip parameter")
-				}
-				nodeIPs = vpnIPs
-				nodeConfig.Flannel.Iface, err = net.InterfaceByName(vpnInfo.VPNInterface)
-				if err != nil {
-					return pkgerrors.WithMessagef(err, "unable to find vpn interface: %s", vpnInfo.VPNInterface)
-				}
+				return errors.WithMessagef(err, "unable to find interface %s", cfg.FlannelIface)
 			}
 		}
 
 		// set paths for embedded flannel if enabled
 		hostLocal, err := exec.LookPath("host-local")
 		if err != nil {
-			return pkgerrors.WithMessagef(err, "failed to find host-local")
+			return errors.WithMessagef(err, "failed to find host-local")
 		}
 
 		if cfg.FlannelConf == "" {
@@ -156,12 +181,13 @@ func (e *Embedded) Bootstrap(ctx context.Context, nodeConfig *daemonconfig.Node,
 			nodeConfig.Flannel.ConfFile = cfg.FlannelConf
 			nodeConfig.Flannel.ConfOverride = true
 		}
+		nodeConfig.Flannel.CNIConfFile = cfg.FlannelCniConfFile
 		nodeConfig.AgentConfig.CNIBinDir = filepath.Dir(hostLocal)
 		nodeConfig.AgentConfig.CNIConfDir = filepath.Join(cfg.DataDir, "agent", "etc", "cni", "net.d")
 
 		// It does not make sense to use VPN without its flannel backend
-		if cfg.VPNAuth != "" {
-			nodeConfig.Flannel.Backend = vpnInfo.ProviderName
+		if e.vpnInfo != nil {
+			nodeConfig.Flannel.Backend = e.vpnInfo.ProviderName
 		}
 	}
 
@@ -181,7 +207,7 @@ func (e *Embedded) Kubelet(ctx context.Context, args []string) error {
 		}()
 		err := command.ExecuteContext(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			signals.RequestShutdown(pkgerrors.WithMessage(err, "kubelet exited"))
+			signals.RequestShutdown(errors.WithMessage(err, "kubelet exited"))
 		}
 		signals.RequestShutdown(nil)
 	}()
@@ -202,7 +228,7 @@ func (e *Embedded) KubeProxy(ctx context.Context, args []string) error {
 		}()
 		err := command.ExecuteContext(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			signals.RequestShutdown(pkgerrors.WithMessage(err, "kube-proxy exited"))
+			signals.RequestShutdown(errors.WithMessage(err, "kube-proxy exited"))
 		}
 		signals.RequestShutdown(nil)
 	}()
@@ -216,6 +242,13 @@ func (*Embedded) APIServerHandlers(ctx context.Context) (authenticator.Request, 
 }
 
 func (e *Embedded) APIServer(ctx context.Context, args []string) error {
+	// set feature-gates now, to avoid race conditions between components started in parallel
+	if featureGates := util.ArgValue("feature-gates", args); featureGates != "" {
+		if err := utilfeature.DefaultMutableFeatureGate.Set(featureGates); err != nil {
+			logrus.Warnf("Failed to set feature-gates %s: %v", featureGates, err)
+		}
+	}
+
 	command := apiapp.NewAPIServerCommand(ctx.Done())
 	command.SetArgs(args)
 
@@ -228,7 +261,7 @@ func (e *Embedded) APIServer(ctx context.Context, args []string) error {
 		}()
 		err := command.ExecuteContext(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			signals.RequestShutdown(pkgerrors.WithMessage(err, "apiserver exited"))
+			signals.RequestShutdown(errors.WithMessage(err, "apiserver exited"))
 		}
 		signals.RequestShutdown(nil)
 	}()
@@ -250,7 +283,7 @@ func (e *Embedded) Scheduler(ctx context.Context, nodeReady <-chan struct{}, arg
 		}()
 		err := command.ExecuteContext(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			signals.RequestShutdown(pkgerrors.WithMessage(err, "scheduler exited"))
+			signals.RequestShutdown(errors.WithMessage(err, "scheduler exited"))
 		}
 		signals.RequestShutdown(nil)
 	}()
@@ -271,7 +304,7 @@ func (e *Embedded) ControllerManager(ctx context.Context, args []string) error {
 		}()
 		err := command.ExecuteContext(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			signals.RequestShutdown(pkgerrors.WithMessage(err, "controller-manager exited"))
+			signals.RequestShutdown(errors.WithMessage(err, "controller-manager exited"))
 		}
 		signals.RequestShutdown(nil)
 	}()
@@ -316,7 +349,7 @@ func (*Embedded) CloudControllerManager(ctx context.Context, ccmRBACReady <-chan
 		}()
 		err := command.ExecuteContext(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			signals.RequestShutdown(pkgerrors.WithMessage(err, "cloud-controller-manager exited"))
+			signals.RequestShutdown(errors.WithMessage(err, "cloud-controller-manager exited"))
 		}
 		signals.RequestShutdown(nil)
 	}()
@@ -418,4 +451,11 @@ func (e *Embedded) CRIReadyChan() <-chan struct{} {
 
 func (e Embedded) IsSelfHosted() bool {
 	return false
+}
+
+func (e Embedded) GetVPNInfo() (*vpn.Info, error) {
+	if e.vpnInfo != nil {
+		return e.vpnInfo, nil
+	}
+	return nil, errors.New("VPN info not set")
 }

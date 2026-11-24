@@ -1,24 +1,21 @@
 //go:build !no_cri_dockerd
-// +build !no_cri_dockerd
 
 package cridockerd
 
 import (
 	"context"
-	"errors"
 	"os"
 	"runtime/debug"
 	"strings"
 
 	"github.com/Mirantis/cri-dockerd/cmd"
 	"github.com/Mirantis/cri-dockerd/cmd/version"
-	pkgerrors "github.com/pkg/errors"
-
 	"github.com/k3s-io/k3s/pkg/agent/cri"
 	"github.com/k3s-io/k3s/pkg/cgroups"
 	"github.com/k3s-io/k3s/pkg/daemons/config"
 	"github.com/k3s-io/k3s/pkg/signals"
 	"github.com/k3s-io/k3s/pkg/util"
+	"github.com/k3s-io/k3s/pkg/util/errors"
 	"github.com/sirupsen/logrus"
 
 	utilsnet "k8s.io/utils/net"
@@ -43,7 +40,7 @@ func Run(ctx context.Context, cfg *config.Node) error {
 		}()
 		err := command.ExecuteContext(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			signals.RequestShutdown(pkgerrors.WithMessage(err, "cri-dockerd exited"))
+			signals.RequestShutdown(errors.WithMessage(err, "cri-dockerd exited"))
 		}
 		signals.RequestShutdown(nil)
 	}()

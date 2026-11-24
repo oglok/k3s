@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package etcd
 
@@ -146,7 +145,7 @@ func Test_UnitETCD_IsInitialized(t *testing.T) {
 				t.Errorf("Prep for ETCD.IsInitialized() failed = %v", err)
 				return
 			}
-			if err := e.SetControlConfig(tt.args.config); err != nil {
+			if err := e.SetControlConfig(t.Context(), tt.args.config); err != nil {
 				t.Errorf("ETCD.SetControlConfig() failed= %v", err)
 				return
 			}
@@ -214,6 +213,7 @@ func Test_UnitETCD_Register(t *testing.T) {
 				testutil.CleanupDataDir(cnf)
 				return nil
 			},
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
@@ -226,7 +226,7 @@ func Test_UnitETCD_Register(t *testing.T) {
 				t.Errorf("Setup for ETCD.Register() failed = %v", err)
 				return
 			}
-			if err := e.SetControlConfig(tt.args.config); err != nil {
+			if err := e.SetControlConfig(t.Context(), tt.args.config); err != nil {
 				t.Errorf("ETCD.SetControlConfig() failed = %v", err)
 				return
 			}
@@ -740,6 +740,13 @@ type mockEtcd struct {
 	noLeader    bool
 	defragDelay time.Duration
 	extraAlarms []*etcdserverpb.AlarmMember
+
+	// stub all unhandled calls as Unimplemented
+	etcdserverpb.UnimplementedLeaseServer
+	etcdserverpb.UnimplementedWatchServer
+	etcdserverpb.UnimplementedKVServer
+	etcdserverpb.UnimplementedClusterServer
+	etcdserverpb.UnimplementedMaintenanceServer
 }
 
 // increment call counter for this function

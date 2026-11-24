@@ -27,7 +27,7 @@ var _ = Describe("Use the token CLI to create and join agents", Ordered, func() 
 	Context("Setup cluster with 3 servers", func() {
 		It("should provision servers and agents", func() {
 			var err error
-			tc, err = docker.NewTestConfig("rancher/systemd-node")
+			tc, err = docker.NewTestConfig(GinkgoTB(), "ghcr.io/rancher/systemd-node:v0.0.9")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(tc.ProvisionServers(3)).To(Succeed())
 			tc.SkipStart = true
@@ -68,6 +68,21 @@ var _ = Describe("Use the token CLI to create and join agents", Ordered, func() 
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(len(nodes)).Should(Equal(len(tc.Servers) + 1))
 			}, "60s", "5s").Should(Succeed())
+		})
+	})
+	Context("Delete bootstrap token by full token:", func() {
+		It("Deletes a token using the full token value", func() {
+			token := "deltok.0123456789abcdef"
+			_, err := tc.Servers[0].RunCmdOnNode("k3s token create --ttl=0 " + token)
+			Expect(err).NotTo(HaveOccurred())
+
+			res, err := tc.Servers[0].RunCmdOnNode("k3s token delete " + token)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(ContainSubstring(`bootstrap token "deltok" deleted`))
+
+			res, err = tc.Servers[0].RunCmdOnNode("k3s token list")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).NotTo(ContainSubstring("deltok"))
 		})
 	})
 	Context("Agent joins with temporary token:", func() {

@@ -10,6 +10,11 @@ import (
 const EtcdSnapshotCommand = "etcd-snapshot"
 
 var EtcdSnapshotFlags = []cli.Flag{
+	&cli.StringSliceFlag{
+		Name:        "etcd-snapshot-restrictions",
+		Usage:       "(db) Enforce restrictions on snapshot configuration; when set the selected defaults cannot be overridden via 'etcd-snapshot' options (valid values: zero or more of 'snapshot-dir', 's3-endpoint', 's3-bucket', 's3-folder', 's3-proxy', 'all')",
+		Destination: &ServerConfig.EtcdSnapshotRestrictions,
+	},
 	DebugFlag,
 	ConfigFlag,
 	LogFile,
@@ -55,7 +60,7 @@ var EtcdSnapshotFlags = []cli.Flag{
 	&cli.IntFlag{
 		Name:        "snapshot-retention,",
 		Aliases:     []string{"etcd-snapshot-retention"},
-		Usage:       "(db) Number of snapshots to retain.",
+		Usage:       "(db) Number of local snapshots to retain on each server node",
 		Destination: &ServerConfig.EtcdSnapshotRetention,
 		Value:       defaultSnapshotRentention,
 	},
@@ -127,7 +132,7 @@ var EtcdSnapshotFlags = []cli.Flag{
 	&cli.IntFlag{
 		Name:        "s3-retention",
 		Aliases:     []string{"etcd-s3-retention"},
-		Usage:       "(db) Number of s3 snapshots to retain.",
+		Usage:       "(db) Number of S3 snapshots to retain in the configured region, bucket, and prefix",
 		Destination: &ServerConfig.EtcdS3Retention,
 		Value:       defaultSnapshotRentention,
 	},
@@ -164,7 +169,7 @@ var EtcdSnapshotFlags = []cli.Flag{
 	},
 }
 
-func NewEtcdSnapshotCommands(delete, list, prune, save func(ctx *cli.Context) error) *cli.Command {
+func NewEtcdSnapshotCommands(deleteFunc, listFunc, pruneFunc, saveFunc func(ctx *cli.Context) error) *cli.Command {
 	return &cli.Command{
 		Name:            EtcdSnapshotCommand,
 		Usage:           "Manage etcd snapshots",
@@ -174,14 +179,14 @@ func NewEtcdSnapshotCommands(delete, list, prune, save func(ctx *cli.Context) er
 				Name:            "save",
 				Usage:           "Trigger an immediate etcd snapshot",
 				SkipFlagParsing: false,
-				Action:          save,
+				Action:          saveFunc,
 				Flags:           EtcdSnapshotFlags,
 			},
 			{
 				Name:            "delete",
 				Usage:           "Delete given snapshot(s)",
 				SkipFlagParsing: false,
-				Action:          delete,
+				Action:          deleteFunc,
 				Flags:           EtcdSnapshotFlags,
 			},
 			{
@@ -189,7 +194,7 @@ func NewEtcdSnapshotCommands(delete, list, prune, save func(ctx *cli.Context) er
 				Aliases:         []string{"list", "l"},
 				Usage:           "List snapshots",
 				SkipFlagParsing: false,
-				Action:          list,
+				Action:          listFunc,
 				Flags: append(EtcdSnapshotFlags, &cli.StringFlag{
 					Name:        "output",
 					Aliases:     []string{"o"},
@@ -201,7 +206,7 @@ func NewEtcdSnapshotCommands(delete, list, prune, save func(ctx *cli.Context) er
 				Name:            "prune",
 				Usage:           "Remove snapshots that match the name prefix that exceed the configured retention count",
 				SkipFlagParsing: false,
-				Action:          prune,
+				Action:          pruneFunc,
 				Flags:           EtcdSnapshotFlags,
 			},
 		},

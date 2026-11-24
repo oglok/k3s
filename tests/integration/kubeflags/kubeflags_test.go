@@ -1,6 +1,7 @@
 package kubeflags
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -8,7 +9,6 @@ import (
 	testutil "github.com/k3s-io/k3s/tests/integration"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pkg/errors"
 )
 
 var server *testutil.K3sServer
@@ -114,6 +114,7 @@ var _ = Describe("create a new cluster with kube-* flags", Ordered, func() {
 		When("server is setup without kube-proxy or cloud-controller-manager ", func() {
 			It("kills previous server and clean logs", func() {
 				Expect(testutil.K3sKillServer(server)).To(Succeed())
+				Expect(testutil.K3sCleanup(-1, "")).To(Succeed())
 			})
 			It("start up with disabled kube-proxy and cloud controller", func() {
 				var err error
@@ -167,6 +168,7 @@ var _ = Describe("create a new cluster with kube-* flags", Ordered, func() {
 			})
 			It("kills previous server and clean logs", func() {
 				Expect(testutil.K3sKillServer(server)).To(Succeed())
+				Expect(testutil.K3sCleanup(-1, "")).To(Succeed())
 			})
 			It("start up with no problems and fully disabled cloud controller", func() {
 				var err error
@@ -208,13 +210,15 @@ var _ = AfterSuite(func() {
 	if !testutil.IsExistingServer() {
 		if failed {
 			testutil.K3sSaveLog(server, false)
+			testutil.K3sCopyPodLogs(server)
+			testutil.K3sDumpResources(server, "node", "pod", "pvc", "pv")
 		}
 		Expect(testutil.K3sKillServer(server)).To(Succeed())
 		Expect(testutil.K3sCleanup(testLock, "")).To(Succeed())
 	}
 })
 
-func Test_IntegrationEtcdSnapshot(t *testing.T) {
+func Test_IntegrationKubeflags(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Etcd Snapshot Suite")
+	RunSpecs(t, "Kube Flags Suite")
 }

@@ -15,28 +15,30 @@ import (
 const migrateNumNodes = 10
 const createNumNodes = 3
 
+//revive:disable:deep-exit
+
 func Test_UnitAsserts(t *testing.T) {
 	assertEqual(t, 1, 1)
 	assertNotEqual(t, 1, 0)
 }
 
-func Test_PasswordError(t *testing.T) {
-	err := &passwordError{node: "test", err: fmt.Errorf("inner error")}
+func Test_UnitpasswordError(t *testing.T) {
+	err := &passwordError{node: "test", err: errors.New("inner error")}
 	assertEqual(t, errors.Is(err, ErrVerifyFailed), true)
-	assertEqual(t, errors.Is(err, fmt.Errorf("different error")), false)
+	assertEqual(t, errors.Is(err, errors.New("different error")), false)
 	assertNotEqual(t, errors.Unwrap(err), nil)
 }
 
 // --------------------------
 // utility functions
 
-func assertEqual(t *testing.T, a interface{}, b interface{}) {
+func assertEqual(t *testing.T, a any, b any) {
 	if a != b {
 		t.Fatalf("[ %v != %v ]", a, b)
 	}
 }
 
-func assertNotEqual(t *testing.T, a interface{}, b interface{}) {
+func assertNotEqual(t *testing.T, a any, b any) {
 	if a == b {
 		t.Fatalf("[ %v == %v ]", a, b)
 	}

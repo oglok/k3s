@@ -2,7 +2,6 @@ package nodepassword
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"os"
 	"path"
@@ -11,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/k3s-io/k3s/pkg/daemons/config"
 	"github.com/k3s-io/k3s/pkg/util"
-	pkgerrors "github.com/pkg/errors"
+	"github.com/k3s-io/k3s/pkg/util/errors"
+	"github.com/k3s-io/k3s/pkg/version"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -67,10 +66,9 @@ func GetNodeAuthValidator(ctx context.Context, control *config.Control) NodeAuth
 				// If we're running on an etcd-only node, and the request didn't use Node Identity auth,
 				// defer node password verification until an apiserver joins the cluster.
 				return verifyRemotePassword(ctx, control, &mu, deferredNodes, node)
-			} else {
-				// Otherwise, reject the request until the controller is ready.
-				return "", http.StatusServiceUnavailable, util.ErrCoreNotReady
 			}
+			// Otherwise, reject the request until the controller is ready.
+			return "", http.StatusServiceUnavailable, util.ErrCoreNotReady
 		}
 
 		// verify that the node exists, if using Node Identity auth
@@ -107,13 +105,12 @@ func getNodeInfo(req *http.Request) (*nodeInfo, error) {
 		return nil, errors.New("auth user not set")
 	}
 
-	program := mux.Vars(req)["program"]
-	nodeName := req.Header.Get(program + "-Node-Name")
+	nodeName := req.Header.Get(version.Program + "-Node-Name")
 	if nodeName == "" {
 		return nil, errors.New("node name not set")
 	}
 
-	nodePassword := req.Header.Get(program + "-Node-Password")
+	nodePassword := req.Header.Get(version.Program + "-Node-Password")
 	if nodePassword == "" {
 		return nil, errors.New("node password not set")
 	}
@@ -144,16 +141,16 @@ func verifyLocalPassword(ctx context.Context, control *config.Control, mu *sync.
 
 	passBytes, err := os.ReadFile(nodePasswordFile)
 	if err != nil {
-		return "", http.StatusInternalServerError, pkgerrors.WithMessage(err, "unable to read node password file")
+		return "", http.StatusInternalServerError, errors.WithMessage(err, "unable to read node password file")
 	}
 
 	passHash, err := Hasher.CreateHash(strings.TrimSpace(string(passBytes)))
 	if err != nil {
-		return "", http.StatusInternalServerError, pkgerrors.WithMessage(err, "unable to hash node password file")
+		return "", http.StatusInternalServerError, errors.WithMessage(err, "unable to hash node password file")
 	}
 
 	if err := Hasher.VerifyHash(passHash, node.Password); err != nil {
-		return "", http.StatusForbidden, pkgerrors.WithMessage(err, "unable to verify local node password")
+		return "", http.StatusForbidden, errors.WithMessage(err, "unable to verify local node password")
 	}
 
 	mu.Lock()

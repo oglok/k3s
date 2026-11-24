@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	//revive:disable:dot-imports
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	"github.com/sirupsen/logrus"
 )
 
@@ -82,7 +84,7 @@ func (s *testServer) echo(conn net.Conn) {
 }
 
 func ping(conn net.Conn) (string, error) {
-	fmt.Fprintf(conn, "ping\n")
+	fmt.Fprint(conn, "ping\n")
 	result, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
 		return "", err
@@ -261,7 +263,6 @@ var _ = Describe("LoadBalancer", func() {
 
 			// confirm that the default is still listed as default
 			Expect(lb.servers.getDefaultAddress()).To(Equal(defaultServer.address), "default server is not default")
-
 		})
 
 		It("does not return the default server in the address list after removing it", func() {

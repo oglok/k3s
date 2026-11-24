@@ -93,6 +93,8 @@ var _ = DescribeTableSubtree("ca certificate rotation", Ordered, func(serverArgs
 		if !testutil.IsExistingServer() {
 			if failed {
 				testutil.K3sSaveLog(server, false)
+				testutil.K3sCopyPodLogs(server)
+				testutil.K3sDumpResources(server, "node", "pod", "pvc", "pv")
 			}
 			Expect(testutil.K3sKillServer(server)).To(Succeed())
 			Expect(testutil.K3sCleanup(-1, "")).To(Succeed())
@@ -105,7 +107,7 @@ var _ = DescribeTableSubtree("ca certificate rotation", Ordered, func(serverArgs
 	Entry("with etcd", []string{"--cluster-init", "-t", "test", "-d"}),
 )
 
-func Test_IntegrationCertRotation(t *testing.T) {
+func Test_IntegrationCACertRotation(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "CA Cert rotation Suite")
 }

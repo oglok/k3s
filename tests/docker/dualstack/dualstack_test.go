@@ -33,7 +33,7 @@ var _ = DescribeTableSubtree("DualStack Tests", Ordered, func(ipConfig string) {
 	Context("Setup Cluster", func() {
 		It("should provision servers and agents", func() {
 			var err error
-			tc, err = docker.NewTestConfig("rancher/systemd-node")
+			tc, err = docker.NewTestConfig(GinkgoTB(), "ghcr.io/rancher/systemd-node:v0.0.9")
 			Expect(err).NotTo(HaveOccurred())
 			tc.DualStack = true
 			tc.ServerYaml = ipConfig
@@ -50,6 +50,12 @@ var _ = DescribeTableSubtree("DualStack Tests", Ordered, func(ipConfig string) {
 	})
 
 	Context("Validate dualstack components", func() {
+		It("Checks Node Status", func() {
+			Eventually(func() error {
+				return tests.NodesReady(tc.KubeconfigFile, tc.GetNodeNames())
+			}, "620s", "5s").Should(Succeed())
+		})
+
 		It("Verifies that each node has IPv4 and IPv6", func() {
 			for _, node := range append(tc.Servers, tc.Agents...) {
 				ips, err := tests.GetNodeIPs(node.Name, tc.KubeconfigFile)
@@ -57,6 +63,13 @@ var _ = DescribeTableSubtree("DualStack Tests", Ordered, func(ipConfig string) {
 				Expect(ips).To(ContainElements(ContainSubstring("172.18.0"), ContainSubstring("fd11:decf:c0ff")))
 			}
 		})
+
+		It("Checks pod status", func() {
+			Eventually(func() error {
+				return tests.AllPodsUp(tc.KubeconfigFile, "kube-system")
+			}, "620s", "5s").Should(Succeed())
+		})
+
 		It("Verifies that each pod has IPv4 and IPv6", func() {
 			pods, err := tests.ParsePods(tc.KubeconfigFile, "kube-system")
 			Expect(err).NotTo(HaveOccurred())

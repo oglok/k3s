@@ -17,7 +17,7 @@ import (
 
 // Valid nodeOS:
 // bento/ubuntu-24.04, opensuse/Leap-15.6.x86_64
-// eurolinux-vagrant/rocky-8, eurolinux-vagrant/rocky-9,
+// bento/rockylinux-8, bento/rockylinux-9,
 var nodeOS = flag.String("nodeOS", "bento/ubuntu-24.04", "VM operating system")
 var serverCount = flag.Int("serverCount", 3, "number of server nodes")
 var agentCount = flag.Int("agentCount", 2, "number of agent nodes")
@@ -170,7 +170,7 @@ var _ = Describe("Verify Create", Ordered, func() {
 
 			nodes, _ := tests.ParseNodes(tc.KubeconfigFile)
 			Eventually(func(g Gomega) {
-				count, err := e2e.GetDaemonsetReady("test-daemonset", tc.KubeconfigFile)
+				count, err := tests.GetDaemonsetReady("test-daemonset", tc.KubeconfigFile)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(nodes).To(HaveLen(count), "Daemonset pod count does not match node count")
 			}, "240s", "10s").Should(Succeed())
@@ -267,7 +267,7 @@ var _ = Describe("Verify Create", Ordered, func() {
 						}
 					}
 				}
-				count, err := e2e.GetDaemonsetReady("test-daemonset", tc.KubeconfigFile)
+				count, err := tests.GetDaemonsetReady("test-daemonset", tc.KubeconfigFile)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(len(nodes)).Should((Equal(count)), "Daemonset pods that are ready does not match node count")
 			}, "620s", "5s").Should(Succeed())

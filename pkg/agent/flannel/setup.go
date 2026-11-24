@@ -2,9 +2,9 @@ package flannel
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
@@ -14,8 +14,9 @@ import (
 	"github.com/k3s-io/k3s/pkg/daemons/config"
 	"github.com/k3s-io/k3s/pkg/signals"
 	"github.com/k3s-io/k3s/pkg/util"
+	"github.com/k3s-io/k3s/pkg/util/errors"
+	"github.com/k3s-io/k3s/pkg/version"
 	"github.com/k3s-io/k3s/pkg/vpn"
-	pkgerrors "github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	v1 "k8s.io/api/core/v1"
@@ -34,26 +35,37 @@ const (
 	"EnableIPv6": %IPV6_ENABLED%,
 	"EnableIPv4": %IPV4_ENABLED%,
 	"IPv6Network": "%CIDR_IPV6%",
-	"Backend": %backend%
+	"Backend": %BACKEND%
 }
 `
 
 	hostGWBackend = `{
-	"Type": "host-gw"
-}`
+		"Type": "host-gw"
+	}`
 
 	tailscaledBackend = `{
-	"Type": "extension",
-	"PostStartupCommand": "tailscale set --accept-routes --advertise-routes=%Routes%",
-	"ShutdownCommand": "tailscale down"
-}`
+		"Type": "extension",
+		"PostStartupCommand": "tailscale set --accept-routes --advertise-routes=%ROUTES%",
+		"ShutdownCommand": "tailscale down"
+	}`
 
 	wireguardNativeBackend = `{
-	"Type": "wireguard",
-	"PersistentKeepaliveInterval": 25
-}`
+		"Type": "wireguard",
+		"PersistentKeepaliveInterval": 25
+	}`
+
+	vxlanBackend = `{
+		"Type": "vxlan",
+		"VNI": %VXLAN_VNI%,
+		"Port": %VXLAN_PORT%
+	}`
 
 	emptyIPv6Network = "::/0"
+)
+
+var (
+	vxlanPortEnv = version.ProgramUpper + "_FLANNEL_VXLAN_PORT"
+	vxlanVniEnv  = version.ProgramUpper + "_FLANNEL_VXLAN_VNI"
 )
 
 type netMode int
@@ -83,10 +95,10 @@ func Run(ctx context.Context, wg *sync.WaitGroup, nodeConfig *config.Node) error
 		return err
 	}
 
-	// use the kubelet kubeconfig to add node annotations, as the k3s-controller
+	// use the kubelet kubeconfig to sync node annotations, as the k3s-controller
 	// rbac does not allow create or update of nodes.
-	if err := setAnnotations(ctx, nodeConfig, coreClient); err != nil {
-		return pkgerrors.WithMessage(err, "flannel failed to set address annotations")
+	if err := syncAnnotations(ctx, nodeConfig, coreClient); err != nil {
+		return errors.WithMessage(err, "flannel failed to sync address annotations")
 	}
 
 	resourceAttrs := authorizationv1.ResourceAttributes{Verb: "list", Resource: "nodes"}
@@ -95,7 +107,7 @@ func Run(ctx context.Context, wg *sync.WaitGroup, nodeConfig *config.Node) error
 	// Flannel needs to watch all nodes in the cluster, which the kubelet is not allowed to do on recent versions of Kubernetes.
 	// If the kubelet cannot list nodes, then wait for the k3s-controller RBAC to become ready, and use that kubeconfig instead.
 	if canListNodes, err := util.CheckRBAC(ctx, kubeConfig, resourceAttrs, ""); err != nil {
-		return pkgerrors.WithMessage(err, "failed to check if RBAC allows node list")
+		return errors.WithMessage(err, "failed to check if RBAC allows node list")
 	} else if !canListNodes {
 		kubeConfig = nodeConfig.AgentConfig.KubeConfigK3sController
 		coreClient, err = util.GetClientSet(kubeConfig)
@@ -103,22 +115,22 @@ func Run(ctx context.Context, wg *sync.WaitGroup, nodeConfig *config.Node) error
 			return err
 		}
 		if err := util.WaitForRBACReady(ctx, kubeConfig, util.DefaultAPIServerReadyTimeout, resourceAttrs, ""); err != nil {
-			return pkgerrors.WithMessage(err, "flannel failed to wait for RBAC")
+			return errors.WithMessage(err, "flannel failed to wait for RBAC")
 		}
 	}
 
 	if err := waitForPodCIDR(ctx, nodeConfig.AgentConfig.NodeName, coreClient); err != nil {
-		return pkgerrors.WithMessage(err, "flannel failed to wait for PodCIDR assignment")
+		return errors.WithMessage(err, "flannel failed to wait for PodCIDR assignment")
 	}
 
 	nm, err := findNetMode(nodeConfig.AgentConfig.ClusterCIDRs)
 	if err != nil {
-		return pkgerrors.WithMessage(err, "failed to check netMode for flannel")
+		return errors.WithMessage(err, "failed to check netMode for flannel")
 	}
 	go func() {
 		err := flannel(ctx, wg, nodeConfig.Flannel.Iface, nodeConfig.Flannel.ConfFile, kubeConfig, nodeConfig.Flannel.IPv6Masq, nm)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			signals.RequestShutdown(pkgerrors.WithMessage(err, "flannel exited"))
+			signals.RequestShutdown(errors.WithMessage(err, "flannel exited"))
 		}
 		signals.RequestShutdown(nil)
 	}()
@@ -137,7 +149,7 @@ func waitForPodCIDR(ctx context.Context, nodeName string, coreClient kubernetes.
 	}
 
 	if _, err := toolswatch.UntilWithSync(ctx, lw, &v1.Node{}, nil, condition); err != nil {
-		return pkgerrors.WithMessage(err, "failed to wait for PodCIDR assignment")
+		return errors.WithMessage(err, "failed to wait for PodCIDR assignment")
 	}
 
 	logrus.Info("Flannel found PodCIDR assigned for node " + nodeName)
@@ -185,6 +197,14 @@ func createFlannelConf(nodeConfig *config.Node) error {
 		logrus.Fatalf("Flannel error checking netMode: %v", err)
 		return err
 	}
+
+	for _, env := range nodeConfig.Flannel.BackendEnv {
+		if strings.HasPrefix(env, version.ProgramUpper+"_FLANNEL_") {
+			k, v, _ := strings.Cut(env, "=")
+			os.Setenv(k, v)
+		}
+	}
+
 	confJSON := flannelConf
 	if nm.IPv4Enabled() {
 		confJSON = strings.ReplaceAll(confJSON, "%IPV4_ENABLED%", "true")
@@ -216,21 +236,21 @@ func createFlannelConf(nodeConfig *config.Node) error {
 		confJSON = strings.ReplaceAll(confJSON, "%CIDR_IPV6%", emptyIPv6Network)
 	}
 
-	var backendConf string
-
-	// precheck and error out unsupported flannel backends.
-	switch nodeConfig.Flannel.Backend {
-	case BackendHostGW:
-	case BackendTailscale:
-	case BackendWireguardNative:
-		if goruntime.GOOS == "windows" {
+	// precheck and error out unsupported flannel backends for windows.
+	if goruntime.GOOS == "windows" {
+		switch nodeConfig.Flannel.Backend {
+		case BackendVXLAN, BackendNone:
+			// these are the only supported backends
+		default:
 			return fmt.Errorf("unsupported flannel backend '%s' for Windows", nodeConfig.Flannel.Backend)
 		}
 	}
 
+	var backendConf string
+
 	switch nodeConfig.Flannel.Backend {
 	case BackendVXLAN:
-		backendConf = vxlanBackend
+		backendConf = renderVXLAN()
 	case BackendHostGW:
 		backendConf = hostGWBackend
 	case BackendTailscale:
@@ -242,7 +262,7 @@ func createFlannelConf(nodeConfig *config.Node) error {
 			routes = append(routes, "$IPV6SUBNET")
 		}
 		if len(routes) == 0 {
-			return fmt.Errorf("incorrect netMode for flannel tailscale backend")
+			return errors.New("incorrect netMode for flannel tailscale backend")
 		}
 		advertisedRoutes, err := vpn.GetAdvertisedRoutes()
 		if err == nil && advertisedRoutes != nil {
@@ -250,13 +270,13 @@ func createFlannelConf(nodeConfig *config.Node) error {
 				routes = append(routes, advertisedRoute.String())
 			}
 		}
-		backendConf = strings.ReplaceAll(tailscaledBackend, "%Routes%", strings.Join(routes, ","))
+		backendConf = strings.ReplaceAll(tailscaledBackend, "%ROUTES%", strings.Join(routes, ","))
 	case BackendWireguardNative:
 		backendConf = wireguardNativeBackend
 	default:
 		return fmt.Errorf("Cannot configure unknown flannel backend '%s'", nodeConfig.Flannel.Backend)
 	}
-	confJSON = strings.ReplaceAll(confJSON, "%backend%", backendConf)
+	confJSON = strings.ReplaceAll(confJSON, "%BACKEND%", backendConf)
 
 	logrus.Debugf("The flannel configuration is %s", confJSON)
 	return agentutil.WriteFile(nodeConfig.Flannel.ConfFile, confJSON)
@@ -283,19 +303,37 @@ func findNetMode(cidrs []*net.IPNet) (netMode, error) {
 	return 0, errors.New("Failed checking netMode")
 }
 
-func setAnnotations(ctx context.Context, nodeConfig *config.Node, coreClient kubernetes.Interface) error {
+func syncAnnotations(ctx context.Context, nodeConfig *config.Node, coreClient kubernetes.Interface) error {
+	nodes := coreClient.CoreV1().Nodes()
+	node, err := nodes.Get(ctx, nodeConfig.AgentConfig.NodeName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
 	patch := util.NewPatchList()
-	patcher := util.NewPatcher[*v1.Node](coreClient.CoreV1().Nodes())
-	if nodeConfig.AgentConfig.NodeExternalIP != "" && nodeConfig.Flannel.ExternalIP {
+	patcher := util.NewPatcher[*v1.Node](nodes)
+	if nodeConfig.Flannel.ExternalIP {
 		for _, ipAddress := range nodeConfig.AgentConfig.NodeExternalIPs {
-			if utilsnet.IsIPv4(ipAddress) {
+			if utilsnet.IsIPv4(ipAddress) && node.Annotations[ExternalIPv4Annotation] != ipAddress.String() {
 				patch.Add(ipAddress.String(), "metadata", "annotations", ExternalIPv4Annotation)
 			}
-			if utilsnet.IsIPv6(ipAddress) {
+			if utilsnet.IsIPv6(ipAddress) && node.Annotations[ExternalIPv6Annotation] != ipAddress.String() {
 				patch.Add(ipAddress.String(), "metadata", "annotations", ExternalIPv6Annotation)
 			}
 		}
+	} else {
+		if _, ok := node.Annotations[ExternalIPv4Annotation]; ok {
+			patch.Remove("metadata", "annotations", ExternalIPv4Annotation)
+		}
+		if _, ok := node.Annotations[ExternalIPv6Annotation]; ok {
+			patch.Remove("metadata", "annotations", ExternalIPv6Annotation)
+		}
 	}
-	_, err := patcher.Patch(ctx, patch, nodeConfig.AgentConfig.NodeName)
+	_, err = patcher.Patch(ctx, patch, nodeConfig.AgentConfig.NodeName)
 	return err
+}
+
+func renderVXLAN() string {
+	backend := strings.ReplaceAll(vxlanBackend, "%VXLAN_VNI%", os.Getenv(vxlanVniEnv))
+	return strings.ReplaceAll(backend, "%VXLAN_PORT%", os.Getenv(vxlanPortEnv))
 }
