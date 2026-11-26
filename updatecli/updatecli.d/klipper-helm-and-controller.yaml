@@ -1,5 +1,6 @@
 ---
 name: "Bump Klipper Helm and Helm Controller version"
+pipelineid: "k3s-io"
 scms:
   k3s:
     kind: "github"
@@ -8,11 +9,9 @@ scms:
       email: "{{ .github.email }}"
       username: "{{ .github.username }}"
       token: "{{ requiredEnv .github.token }}"
-      owner: "{{ .k3s.org }}"
-      repository: "{{ .k3s.repo }}"
-      branch: "{{ .k3s.branch }}"
-      commitmessage:
-        title: "Bump Klipper Helm and Helm Controller version"
+      owner: '{{ requiredEnv .github.org }}'
+      repository: '{{ requiredEnv .github.repo }}'
+      branch: '{{ requiredEnv .github.branch }}'
   helm-controller:
     kind: "github"
     spec:
@@ -26,15 +25,14 @@ scms:
 
 actions:
   github:
-    title: "Bump Klipper Helm and Helm Controller version"
+    title: "[{{ requiredEnv .github.branch }}] Bump k3s-io images"
     kind: "github/pullrequest"
     scmid: "k3s"
     spec:
-      automerge: false
+      merge:
+        strategy: "manual"
       mergemethod: "squash"
-      usetitleforautomerge: true
-      parent: false
-      labels: 
+      labels:
         - "dependencies"
 
 sources:
@@ -46,8 +44,9 @@ sources:
       repository: "{{ .helm_controller.repo }}"
       branch: "{{ .helm_controller.branch }}"
       token: "{{ requiredEnv .github.token }}"
-      typefilter:
-        latest: true
+      versionfilter:
+        kind: "semver"
+        pattern: '{{ requiredEnv .helm_controller.version_pattern }}'
   klipper-helm:
     name: "Get Klipper Helm latest release version"
     kind: "githubrelease"
@@ -82,18 +81,10 @@ conditions:
     spec:
       file: "go.mod"
       matchpattern: 'github.com/k3s-io/helm-controller'
-  klipper-helm-in-helm-controller:
-    name: "Check rancher/klipper-helm image version in Helm Controller"
-    kind: "file"
-    scmid: "helm-controller"
-    disablesourceinput: true
-    spec:
-      file: "pkg/controllers/chart/chart.go"
-      matchpattern: 'rancher/klipper-helm:{{ source "klipper-helm" }}'
 
 targets:
   go-mod:
-    name: "Run go mod update"
+    name: 'Bump helm-controller to {{ source "helm-controller" }}'
     kind: "shell"
     scmid: "k3s"
     disablesourceinput: true
@@ -103,7 +94,7 @@ targets:
         - name: PATH
         - name: HOME
   klipper-helm:
-    name: "Update rancher/klipper-helm image version"
+    name: 'Bump klipper-helm image to {{ source "klipper-helm" }}'
     kind: "file"
     scmid: "k3s"
     sourceid: "klipper-helm"
@@ -111,4 +102,13 @@ targets:
       file: "scripts/airgap/image-list.txt"
       matchpattern: 'rancher/klipper-helm:v\d+\.\d+\.\d+(-\w+)?'
       replacepattern: 'rancher/klipper-helm:{{ source "klipper-helm" }}'
+  versionfile:
+    name: 'Bump klipper-helm to {{ source "klipper-helm" }} in scripts/version.sh'
+    kind: "file"
+    scmid: "k3s"
+    sourceid: "klipper-helm"
+    spec:
+      file: "scripts/version.sh"
+      matchpattern: '(?m)^VERSION_HELM_JOB=(.*)'
+      replacepattern: 'VERSION_HELM_JOB="{{ source "klipper-helm" }}"'
 

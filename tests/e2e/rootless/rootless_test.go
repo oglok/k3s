@@ -145,7 +145,7 @@ var _ = Describe("Various Startup Configurations", Ordered, func() {
 		})
 
 		It("Runs an interactive command a pod", func() {
-			cmd := "kubectl run busybox --rm -it --restart=Never --image=rancher/mirrored-library-busybox:1.34.1 -- uname -a"
+			cmd := "kubectl run busybox --rm -it --restart=Never --image=ghcr.io/k3s-io/mirrored-library-busybox:1.38.0 -- uname -a"
 			_, err := tests.RunCommand(cmd)
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -228,7 +228,7 @@ func SaveRootlessJournalLogs(nodes []e2e.VagrantNode) error {
 			return err
 		}
 		defer lf.Close()
-		cmd := "vagrant ssh --no-tty " + node.Name + " -c \"journalctl -u --user k3s-rootless --no-pager\""
+		cmd := "vagrant ssh --no-tty " + node.Name + " -c \"journalctl --user -u k3s-rootless --no-pager\""
 		logs, err := tests.RunCommand(cmd)
 		if err != nil {
 			return err

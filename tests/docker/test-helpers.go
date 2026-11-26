@@ -2,6 +2,7 @@ package docker
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/k3s-io/k3s/tests"
@@ -18,6 +20,8 @@ import (
 )
 
 type TestConfig struct {
+	testing.TB
+
 	TestDir        string
 	KubeconfigFile string
 	Token          string
@@ -32,6 +36,8 @@ type TestConfig struct {
 }
 
 type DockerNode struct {
+	testing.TB
+
 	Name string
 	IP   string
 	Port int    // Not filled by agent nodes
@@ -41,6 +47,7 @@ type DockerNode struct {
 // RunCmdOnNode runs a command on a docker container
 func (node DockerNode) RunCmdOnNode(cmd string) (string, error) {
 	dCmd := fmt.Sprintf("docker exec %s /bin/sh -c \"%s\"", node.Name, cmd)
+	node.TB.Logf("Running command on node %s: %s", node.Name, cmd)
 	out, err := tests.RunCommand(dCmd)
 	if err != nil {
 		return out, fmt.Errorf("%v: on node %s: %s", err, node.Name, out)
@@ -49,12 +56,17 @@ func (node DockerNode) RunCmdOnNode(cmd string) (string, error) {
 }
 
 // NewTestConfig initializes the test environment and returns the configuration
-// If k3sImage == "rancher/systemd-node", then the systemd-node container and the local k3s binary
+// If k3sImage is ghcr.io/rancher/systemd-node, then the systemd-node container and the local k3s binary
 // will be used to start the server. This is useful for scenarios where the server needs to be restarted.
 // k3s version and tag information should be extracted from the version.sh script
 // and supplied as an argument to the function/test
-func NewTestConfig(k3sImage string) (*TestConfig, error) {
+func NewTestConfig(tb testing.TB, k3sImage string) (*TestConfig, error) {
+	if k3sImage == "" {
+		return nil, errors.New("k3s image must be set")
+	}
+
 	config := &TestConfig{
+		TB:       tb,
 		K3sImage: k3sImage,
 	}
 
@@ -68,6 +80,11 @@ func NewTestConfig(k3sImage string) (*TestConfig, error) {
 	// Create required directories
 	if err := os.MkdirAll(filepath.Join(config.TestDir, "logs"), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create logs directory: %v", err)
+	}
+
+	// Pull the K3s system images from GHCR; mounted into every node
+	if err := tests.WriteRegistries(filepath.Join(config.TestDir, "registries.yaml")); err != nil {
+		return nil, fmt.Errorf("failed to write registries.yaml: %v", err)
 	}
 
 	// Generate random secret
@@ -139,6 +156,7 @@ func (config *TestConfig) ProvisionServers(numOfServers int) error {
 			joinServer = fmt.Sprintf("--server %s", config.Servers[0].URL)
 		}
 		newServer := DockerNode{
+			TB:   config.TB,
 			Name: name,
 			Port: port,
 		}
@@ -163,7 +181,7 @@ func (config *TestConfig) ProvisionServers(numOfServers int) error {
 
 		// If we need restarts, we use the systemd-node container, volume mount the k3s binary
 		// and start the server using the install script
-		if config.K3sImage == "rancher/systemd-node" {
+		if strings.HasPrefix(config.K3sImage, "ghcr.io/rancher/systemd-node") {
 			dRun := strings.Join([]string{"docker run -d",
 				"--name", name,
 				"--hostname", name,
@@ -179,8 +197,10 @@ func (config *TestConfig) ProvisionServers(numOfServers int) error {
 				"-v", "/var/run/docker.sock:/var/run/docker.sock",
 				"-v", "/var/lib/docker:/var/lib/docker",
 				"--mount", "type=bind,source=$(pwd)/../../../dist/artifacts/k3s,target=/usr/local/bin/k3s",
-				fmt.Sprintf("%s:v0.0.5", config.K3sImage),
+				"--mount", fmt.Sprintf("type=bind,source=%s,target=/etc/rancher/k3s/registries.yaml,readonly", filepath.Join(config.TestDir, "registries.yaml")),
+				config.K3sImage,
 				"/usr/lib/systemd/systemd --unit=noop.target --show-status=true"}, " ")
+			config.TB.Logf("Starting server %s: %s", name, dRun)
 			if out, err := tests.RunCommand(dRun); err != nil {
 				return fmt.Errorf("failed to start systemd container: %s: %v", out, err)
 			}
@@ -232,22 +252,19 @@ func (config *TestConfig) ProvisionServers(numOfServers int) error {
 				"-e", "GOCOVERDIR=/tmp/",
 				os.Getenv("SERVER_DOCKER_ARGS"),
 				os.Getenv(fmt.Sprintf("SERVER_%d_DOCKER_ARGS", i)),
+				"--mount", fmt.Sprintf("type=bind,source=%s,target=/etc/rancher/k3s/registries.yaml,readonly", filepath.Join(config.TestDir, "registries.yaml")),
 				os.Getenv("REGISTRY_CLUSTER_ARGS"),
 				yamlMount,
 				config.K3sImage,
 				"server", dbConnect, joinServer, os.Getenv(fmt.Sprintf("SERVER_%d_ARGS", i))}, " ")
+			config.TB.Logf("Starting server %s: %s", name, dRun)
 			if out, err := tests.RunCommand(dRun); err != nil {
 				return fmt.Errorf("failed to run server container: %s: %v", out, err)
 			}
 		}
 
 		// Get the IP address of the container
-		var cmd string
-		if config.DualStack {
-			cmd = "docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{printf \"%s\" $v.IPAddress}}{{end}}' " + name
-		} else {
-			cmd = "docker inspect --format '{{ .NetworkSettings.IPAddress }}' " + name
-		}
+		cmd := "docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{printf \"%s\" $v.IPAddress}}{{end}}' " + name
 		ipOutput, err := tests.RunCommand(cmd)
 		if err != nil {
 			return fmt.Errorf("failed to get container IP address: %s: %v", ipOutput, err)
@@ -259,7 +276,7 @@ func (config *TestConfig) ProvisionServers(numOfServers int) error {
 		newServer.IP = ip
 		config.Servers = append(config.Servers, newServer)
 
-		fmt.Printf("Started %s @ %s\n", name, url)
+		config.TB.Logf("Started %s @ %s", name, url)
 
 		// Sleep for a bit to allow the first server to start
 		if i == 0 && numOfServers > 1 {
@@ -278,7 +295,6 @@ func (config *TestConfig) ProvisionServers(numOfServers int) error {
 // setupDatabase will start the configured database if startDB is true,
 // and return the correct flag to join the configured database
 func (config *TestConfig) setupDatabase(startDB bool) (string, error) {
-
 	joinFlag := ""
 	startCmd := ""
 	switch config.DBType {
@@ -288,6 +304,9 @@ func (config *TestConfig) setupDatabase(startDB bool) (string, error) {
 	case "postgres":
 		startCmd = "docker run -d --name postgres -e POSTGRES_USER=root -e POSTGRES_PASSWORD=docker -p 5432:5432 postgres:16-alpine"
 		joinFlag = "--datastore-endpoint='postgres://root:docker@172.17.0.1:5432/k3s'"
+	case "t4":
+		startCmd = "docker run -d --name t4 -e COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS=test-bucket -e debug=true -p 9090:9090 -p 9191:9191 -t mirror.gcr.io/adobe/s3mock:5.0.0"
+		joinFlag = "--datastore-endpoint=t4:// --etcd-s3-endpoint=http://172.17.0.1:9090 --etcd-s3-bucket=test-bucket --etcd-s3-access-key=access-key --etcd-s3-secret-key=secret-key"
 	case "etcd":
 		if startDB {
 			joinFlag = "--cluster-init"
@@ -324,6 +343,7 @@ func (config *TestConfig) ProvisionAgents(numOfAgents int) error {
 
 			agentInstanceArgs := fmt.Sprintf("AGENT_%d_ARGS", i)
 			newAgent := DockerNode{
+				TB:   config.TB,
 				Name: name,
 			}
 
@@ -335,7 +355,7 @@ func (config *TestConfig) ProvisionAgents(numOfAgents int) error {
 			if config.SkipStart {
 				skipStart = "INSTALL_K3S_SKIP_START=true"
 			}
-			if config.K3sImage == "rancher/systemd-node" {
+			if strings.HasPrefix(config.K3sImage, "ghcr.io/rancher/systemd-node") {
 				dRun := strings.Join([]string{"docker run -d",
 					"--name", name,
 					"--hostname", name,
@@ -349,8 +369,10 @@ func (config *TestConfig) ProvisionAgents(numOfAgents int) error {
 					"-v", "/var/run/docker.sock:/var/run/docker.sock",
 					"-v", "/var/lib/docker:/var/lib/docker",
 					"--mount", "type=bind,source=$(pwd)/../../../dist/artifacts/k3s,target=/usr/local/bin/k3s",
-					fmt.Sprintf("%s:v0.0.5", config.K3sImage),
+					"--mount", fmt.Sprintf("type=bind,source=%s,target=/etc/rancher/k3s/registries.yaml,readonly", filepath.Join(config.TestDir, "registries.yaml")),
+					config.K3sImage,
 					"/usr/lib/systemd/systemd --unit=noop.target --show-status=true"}, " ")
+				config.TB.Logf("Starting agent %s: %s", name, dRun)
 				if out, err := tests.RunCommand(dRun); err != nil {
 					return fmt.Errorf("failed to start systemd container: %s: %v", out, err)
 				}
@@ -387,22 +409,18 @@ func (config *TestConfig) ProvisionAgents(numOfAgents int) error {
 					"-e", "GOCOVERDIR=/tmp/",
 					os.Getenv("AGENT_DOCKER_ARGS"),
 					os.Getenv(fmt.Sprintf("AGENT_%d_DOCKER_ARGS", i)),
+					"--mount", fmt.Sprintf("type=bind,source=%s,target=/etc/rancher/k3s/registries.yaml,readonly", filepath.Join(config.TestDir, "registries.yaml")),
 					os.Getenv("REGISTRY_CLUSTER_ARGS"),
 					config.K3sImage,
 					"agent", os.Getenv("ARGS"), os.Getenv(agentInstanceArgs)}, " ")
-
+				config.TB.Logf("Starting agent %s: %s", name, dRun)
 				if out, err := tests.RunCommand(dRun); err != nil {
 					return fmt.Errorf("failed to run agent container: %s: %v", out, err)
 				}
 			}
 
 			// Get the IP address of the container
-			var cmd string
-			if config.DualStack {
-				cmd = "docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{printf \"%s\" $v.IPAddress}}{{end}}' " + name
-			} else {
-				cmd = "docker inspect --format '{{ .NetworkSettings.IPAddress }}' " + name
-			}
+			cmd := "docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{printf \"%s\" $v.IPAddress}}{{end}}' " + name
 			ipOutput, err := tests.RunCommand(cmd)
 			if err != nil {
 				return err
@@ -411,7 +429,7 @@ func (config *TestConfig) ProvisionAgents(numOfAgents int) error {
 			newAgent.IP = ip
 			config.Agents = append(config.Agents, newAgent)
 
-			fmt.Printf("Started %s\n", name)
+			config.TB.Logf("Started %s", name)
 			return nil
 		})
 	}
@@ -432,7 +450,7 @@ func (config *TestConfig) RemoveNode(nodeName string) error {
 	if _, err := tests.RunCommand(cmd); err != nil {
 		return fmt.Errorf("failed to remove node %s: %v", nodeName, err)
 	}
-	fmt.Println("Stopped and removed ", nodeName)
+	config.TB.Logf("Stopped and removed %s", nodeName)
 	return nil
 }
 
@@ -487,7 +505,8 @@ func (config *TestConfig) Cleanup() error {
 		errs = append(errs, fmt.Errorf("failed to remove volumes: %v", err))
 	}
 	// Stop DB if it was started
-	if config.DBType == "mysql" || config.DBType == "postgres" {
+	switch config.DBType {
+	case "mysql", "postgres", "t4":
 		cmd := fmt.Sprintf("docker stop %s", config.DBType)
 		if _, err := tests.RunCommand(cmd); err != nil {
 			errs = append(errs, fmt.Errorf("failed to stop %s: %v", config.DBType, err))
@@ -539,7 +558,7 @@ func (config *TestConfig) CopyAndModifyKubeconfig() error {
 		cmd = fmt.Sprintf("docker cp %s:/etc/rancher/k3s/k3s.yaml %s/kubeconfig.yaml", config.Servers[serverID].Name, config.TestDir)
 		_, err = tests.RunCommand(cmd)
 		if err != nil {
-			fmt.Printf("Failed to copy kubeconfig, attempt %d: %v\n", i, err)
+			config.TB.Logf("Failed to copy kubeconfig, attempt %d: %v\n", i, err)
 			time.Sleep(10 * time.Second)
 		} else {
 			break
@@ -562,7 +581,7 @@ func (config *TestConfig) CopyAndModifyKubeconfig() error {
 	if err := os.Setenv("DOCKER_KUBECONFIG", config.KubeconfigFile); err != nil {
 		return err
 	}
-	fmt.Println("Kubeconfig file: ", config.KubeconfigFile)
+	config.TB.Log("Kubeconfig file: ", config.KubeconfigFile)
 	return nil
 }
 
@@ -653,7 +672,7 @@ func (config TestConfig) DeployWorkload(workload string) (string, error) {
 		err = fmt.Errorf("%s : Unable to read resource manifest file for %s", err, workload)
 		return "", err
 	}
-	fmt.Println("\nDeploying", workload)
+	config.TB.Log("Deploying", workload)
 	for _, f := range files {
 		filename := filepath.Join(resourceDir, f.Name())
 		if strings.TrimSpace(f.Name()) == workload {

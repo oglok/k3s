@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/k3s-io/k3s/pkg/flock"
+	"github.com/k3s-io/k3s/pkg/util/errors"
 	"github.com/k3s-io/k3s/tests"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -30,6 +30,7 @@ var existingServer = "False"
 
 const lockFile = "/tmp/k3s-test.lock"
 const DefaultConfig = "/etc/rancher/k3s/k3s.yaml"
+const DefaultRegistries = "/etc/rancher/k3s/registries.yaml"
 
 type K3sServer struct {
 	cmd *exec.Cmd
@@ -184,6 +185,9 @@ func K3sStartServer(inputArgs ...string) (*K3sServer, error) {
 	}
 
 	k3sBin := findK3sExecutable()
+	if err := tests.WriteRegistries(DefaultRegistries); err != nil {
+		return nil, err
+	}
 	k3sCmd := append([]string{"server"}, inputArgs...)
 	cmd := exec.Command(k3sBin, k3sCmd...)
 	// Give the server a new group id so we can kill it and its children later
@@ -239,16 +243,16 @@ func K3sKillServer(server *K3sServer) error {
 			logrus.Warnf("Unable to kill k3s server: %v", err)
 			return nil
 		}
-		return errors.Wrap(err, "failed to find k3s process group")
+		return errors.WithMessage(err, "failed to find k3s process group")
 	}
 	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
-		return errors.Wrap(err, "failed to kill k3s process group")
+		return errors.WithMessage(err, "failed to kill k3s process group")
 	}
 	if err := server.cmd.Process.Kill(); err != nil {
-		return errors.Wrap(err, "failed to kill k3s process")
+		return errors.WithMessage(err, "failed to kill k3s process")
 	}
 	if _, err = server.cmd.Process.Wait(); err != nil {
-		return errors.Wrap(err, "failed to wait for k3s process exit")
+		return errors.WithMessage(err, "failed to wait for k3s process exit")
 	}
 	//Unmount all the associated filesystems
 	unmountFolder("/run/k3s")
@@ -284,6 +288,9 @@ func K3sCleanup(k3sTestLock int, dataDir string) error {
 	if err := os.RemoveAll(dataDir); err != nil {
 		return err
 	}
+	if err := os.RemoveAll(DefaultRegistries); err != nil {
+		return err
+	}
 	if k3sTestLock != -1 {
 		return flock.Release(k3sTestLock)
 	}
@@ -311,6 +318,30 @@ func K3sSaveLog(server *K3sServer, dump bool) error {
 	}
 	fmt.Printf("Server Log Dump:\n\n%s\n\n", b)
 	return nil
+}
+
+func K3sCopyPodLogs(server *K3sServer) error {
+	f, err := os.Create("var-log-pods-log.txt")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	results, _ := RunCommand("find /var/log/pods -type f | xargs tail -n 10000")
+	_, err = fmt.Fprint(f, results)
+	return err
+}
+
+func K3sDumpResources(server *K3sServer, resources ...string) error {
+	f, err := os.Create("resources-dump-log.txt")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	results, _ := K3sCmd("kubectl", "get", "-A", "-o", "yaml", strings.Join(resources, ","))
+	_, err = fmt.Fprint(f, results)
+	return err
 }
 
 func GetEndpointsAddresses() (string, error) {
@@ -342,7 +373,7 @@ func RunCommand(cmd string) (string, error) {
 	c.Stderr = &out
 	err := c.Run()
 	if err != nil {
-		return out.String(), fmt.Errorf("%s", err)
+		return out.String(), fmt.Errorf("failed to run command: %s, %v: %s", cmd, err, out.String())
 	}
 	return out.String(), nil
 }

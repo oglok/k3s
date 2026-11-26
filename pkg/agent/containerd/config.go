@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/containerd/containerd/v2/core/remotes/docker"
@@ -72,7 +73,7 @@ func writeContainerdConfig(cfg *config.Node, containerdConfig templates.Containe
 
 // writeContainerdHosts merges registry mirrors/configs, and renders and saves hosts.toml from the filled template
 func writeContainerdHosts(cfg *config.Node, containerdConfig templates.ContainerdConfig) error {
-	mirrorAddr := net.JoinHostPort(spegel.DefaultRegistry.InternalAddress, spegel.DefaultRegistry.RegistryPort)
+	mirrorAddr := net.JoinHostPort(spegel.DefaultRegistry.InternalAddress, strconv.Itoa(spegel.DefaultRegistry.RegistryPort))
 	hosts := getHostConfigs(containerdConfig.PrivateRegistryConfig, containerdConfig.NoDefaultEndpoint, mirrorAddr)
 
 	// Clean up previous configuration templates
@@ -162,17 +163,17 @@ func getHostConfigs(registry *registries.Registry, noDefaultEndpoint bool, mirro
 		// create the default config, if it wasn't explicitly mentioned in the config section
 		config, ok := hosts[host]
 		if !ok {
-			if c, err := defaultHostConfig(host, mirrorAddr, configForHost(registry.Configs, host)); err != nil {
+			c, err := defaultHostConfig(host, mirrorAddr, configForHost(registry.Configs, host))
+			if err != nil {
 				logrus.Errorf("Failed to generate config for registry %s: %v", host, err)
 				continue
-			} else {
-				if noDefaultEndpoint {
-					c.Default = nil
-				} else if host == "*" {
-					c.Default = &templates.RegistryEndpoint{URL: &url.URL{}}
-				}
-				config = *c
 			}
+			if noDefaultEndpoint {
+				c.Default = nil
+			} else if host == "*" {
+				c.Default = &templates.RegistryEndpoint{URL: &url.URL{}}
+			}
+			config = *c
 		}
 
 		// track which endpoints we've already seen to avoid creating duplicates

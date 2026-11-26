@@ -1,5 +1,4 @@
 //go:build ctrd
-// +build ctrd
 
 /*
    Copyright The containerd Authors.
@@ -25,6 +24,7 @@ import (
 	_ "github.com/containerd/containerd/v2/core/metrics/cgroups/v2"
 	_ "github.com/containerd/containerd/v2/plugins/diff/erofs/plugin"
 	_ "github.com/containerd/containerd/v2/plugins/diff/walking/plugin"
+	_ "github.com/containerd/containerd/v2/plugins/mount/erofs"
 	_ "github.com/containerd/containerd/v2/plugins/snapshots/blockfile/plugin"
 	_ "github.com/containerd/containerd/v2/plugins/snapshots/btrfs/plugin"
 	_ "github.com/containerd/containerd/v2/plugins/snapshots/devmapper/plugin"
@@ -34,4 +34,5 @@ import (
 	_ "github.com/containerd/fuse-overlayfs-snapshotter/v2/plugin"
 	_ "github.com/containerd/stargz-snapshotter/service/plugin"
 	_ "github.com/containerd/zfs/v2/plugin"
+	_ "github.com/pdtpartners/nix-snapshotter/pkg/plugin"
 )

@@ -1,4 +1,5 @@
 name: "Bump CoreDNS Image Version"
+pipelineid: "addons"
 scms:
   k3s:
     kind: "github"
@@ -7,19 +8,18 @@ scms:
       email: "{{ .github.email }}"
       username: "{{ .github.username }}"
       token: "{{ requiredEnv .github.token }}"
-      owner: "{{ .k3s.org }}"
-      repository: "{{ .k3s.repo }}"
-      branch: "{{ .k3s.branch }}"
-      commitmessage:
-        title: "Bump rancher/mirrored-coredns-coredns image version"
+      owner: '{{ requiredEnv .github.org }}'
+      repository: '{{ requiredEnv .github.repo }}'
+      branch: '{{ requiredEnv .github.branch }}'
 
 actions:
   github:
-    title: "Bump rancher/mirrored-coredns-coredns image version"
+    title: "[{{ requiredEnv .github.branch }}] Bump packaged components"
     kind: "github/pullrequest"
     scmid: "k3s"
     spec:
-      automerge: false
+      merge:
+        strategy: "manual"
       mergemethod: "squash"
       labels:
         - "dependencies"
@@ -56,7 +56,7 @@ conditions:
 
 targets:
   coredns-manifest:
-    name: "Update CoreDNS image version in manifests/coredns.yaml"
+    name: 'Bump CoreDNS image to {{ source "coredns-docker-image" }} in manifests'
     kind: "file"
     scmid: "k3s"
     disablesourceinput: true
@@ -67,7 +67,7 @@ targets:
       replacepattern: 'image: "%{SYSTEM_DEFAULT_REGISTRY}%rancher/mirrored-coredns-coredns:{{ source "coredns-docker-image" }}"'
 
   coredns-airgap:
-    name: "Update CoreDNS image version in scripts/airgap/image-list"
+    name: 'Bump CoreDNS image to {{ source "coredns-docker-image" }} in airgap image list'
     kind: "file"
     scmid: "k3s"
     disablesourceinput: true

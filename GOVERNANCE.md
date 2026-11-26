@@ -9,7 +9,7 @@ This governance explains how the K3s project is run. As such that's a living doc
 - [CNCF Resources](#cncf-resources)  
 - [Code of Conduct Enforcement](#code-of-conduct)  
 - [Security Response Team](#security-response-team)  
-- [Voting](#voting)  
+- [Voting](#voting-and-decision-making)  
 - [Modifications](#modifying-this-charter)
 
 ## Values
@@ -64,11 +64,11 @@ Anyone is eligible to become a Maintainer, you need to demonstrate a few or more
 * understanding of how the team works (policies, processes for testing and code review, etc),  
 * understanding of the project's code base and coding and documentation style.
 
-A new Maintainer must be proposed by an existing Maintainer by sending a message to the [developer mailing list](mailto:k3s-maintainers@lists.cncf.io) and opening PR in [MAINTAINERS](https://github.com/k3s-io/k3s/blob/main/MAINTAINERS). A [supermajority](#Supermajority) vote of existing Maintainers approves the application.  Maintainer nominations will be evaluated without prejudice to employer or demographics.
+A new Maintainer must be proposed by an existing Maintainer by sending a message to the [developer mailing list](mailto:k3s-maintainers@lists.cncf.io) and opening PR in [MAINTAINERS](https://github.com/k3s-io/k3s/blob/main/MAINTAINERS). A [supermajority](#supermajority) vote of existing Maintainers approves the application.  Maintainer nominations will be evaluated without prejudice to employer or demographics.
 
 Maintainers who are selected will be granted the necessary GitHub rights, and invited to the [private Maintainer mailing list](mailto:k3s-maintainers@lists.cncf.io).
 
-Maintainer’s responsibilities:
+Maintainer's responsibilities:
 
 * **Code Quality & Reviews**: Review and merge pull requests, ensure adherence to project standards, and manage the codebase  
 * **Issue Management**: Triage incoming issues, provide guidance, and close or categorize as needed  
@@ -86,7 +86,7 @@ Maintainers may resign at any time if they feel that they will not be able to co
 
 Maintainers may also be removed after being inactive, failure to fulfill their Maintainer responsibilities, violating the Code of Conduct, or other reasons. Inactivity is defined as a period of very low or no activity in the project for a year or more, with no definite schedule to return to full Maintainer activity.
 
-A Maintainer may be removed at any time by a [supermajority](#Supermajority) vote of the remaining Maintainers.
+A Maintainer may be removed at any time by a [supermajority](#supermajority) vote of the remaining Maintainers.
 
 Depending on the reason for removal, a Maintainer may be converted to Emeritus status.  Emeritus Maintainers will still be consulted on some project matters, and can be rapidly returned   
 to Maintainer status if their availability changes.
@@ -98,7 +98,7 @@ Reviewers are able to review code for quality and correctness on some part of a 
 
 * Knowledgeable about the codebase  
 * Sponsored by a Maintainer  
-* New reviewer must be nominated by an existing Maintainer or reviewer or self-nominated and must be elected by a [supermajority](#Supermajority) of existing Maintainers
+* New reviewer must be nominated by an existing Maintainer or reviewer or self-nominated and must be elected by a [supermajority](#supermajority) of existing Maintainers
 
 **Responsibilities and privileges**
 
@@ -120,7 +120,7 @@ User \-\> Contributor \-\> Reviewer \-\> Maintainer
 
 A **supermajority** is defined as two-thirds (2/3) of active Maintainers. A supermajority is calculated based on the number of votes cast, excluding abstentions.
 
-Maintainers may vote "agree / yes / +1", "disagree / no / -1", or "abstain". An "abstain" vote does not count toward the total used to calculate the supermajority — it is equivalent to not voting.
+Maintainers may vote "agree / yes / +1", "disagree / no / -1", or "abstain". An "abstain" vote does not count toward the total used to calculate the supermajority - it is equivalent to not voting.
 
 A vote passes when at least two-thirds of the non-abstaining votes are in favor within the voting period.
 
@@ -129,7 +129,7 @@ Votes must be cast within a defined voting period (e.g., 7 calendar days). If a 
 Failure to vote on major decisions will be considered a sign of inactivity and may indicate that a Maintainer is not fulfilling their responsibilities. This behavior will be taken into account during periodic reviews of Maintainer status.
 
 Examples:
-| Votes Cast | Yes Votes | No Votes | Required Yes Votes (≥2/3) | Result               |
+| Votes Cast | Yes Votes | No Votes | Required Yes Votes (>=2/3) | Result               |
 |------------|-----------|----------|----------------------------|----------------------|
 | 9          | 6         | 3        | 6                          | ✅ Passes (6 = 2/3)   |
 | 9          | 5         | 4        | 6                          | ❌ Fails (5 < 2/3)    |
@@ -155,11 +155,11 @@ Examples:
 ## Voting and Decision Making
 
 While most business in K3s is conducted by "[lazy consensus](https://community.apache.org/committers/lazyConsensus.html)", periodically the Maintainers may need to vote on specific actions or changes. A vote can be taken on [the developer mailing list](mailto:cncf-k3s-dev@lists.cncf.io) or [the private Maintainer mailing list](mailto:cncf-k3s-maintainers@lists.cncf.io) for security or conduct matters.  
-Votes may also be taken at [the community meeting](https://k3s.io/community/#community-meetings).  Any Maintainer may demand a vote be taken.
+Votes may also be taken at [the community meeting](https://k3s.io/community#community-meetings).  Any Maintainer may demand a vote be taken.
 
-Most votes require a [simple majority](#simple-majority) of all Maintainers to succeed, except where otherwise noted.  [Supermajority](#Supermajority) votes mean at least two-thirds of all existing Maintainers.
+Most votes require a [simple majority](#simple-majority) of all Maintainers to succeed, except where otherwise noted.  [Supermajority](#supermajority) votes mean at least two-thirds of all existing Maintainers.
 
-Ideally, all project decisions are resolved by consensus. If impossible, any Maintainer may call a vote. Unless otherwise specified in this document, any vote will be decided by a [supermajority](#Supermajority) of Maintainers.
+Ideally, all project decisions are resolved by consensus. If impossible, any Maintainer may call a vote. Unless otherwise specified in this document, any vote will be decided by a [supermajority](#supermajority) of Maintainers.
 
 In case of situation with not enough participation from maintainer for **non** critical decision we can lower the supermajority to [**simple majority**](#simple-majority).
 
@@ -167,13 +167,13 @@ For any **critital** decisions [CNCF TOC](https://www.cncf.io/people/technical-o
 
 ## Voting requirements:
 
-* Adding a Maintainer: [Supermajority](#Supermajority)
+* Adding a Maintainer: [Supermajority](#supermajority)
 
-* Removing a Maintainer:  [Supermajority](#Supermajority)
+* Removing a Maintainer:  [Supermajority](#supermajority)
 
 * Requesting CNCF resources: [Simple majority](#simple-majority)
 
-* Charter and Governance: [Supermajority](#Supermajority)
+* Charter and Governance: [Supermajority](#supermajority)
 
 If a vote does not meet quorum (e.g., fewer than 50% of Maintainers vote), the vote may be postponed or escalated to a follow-up meeting.
 
@@ -201,7 +201,7 @@ The proposal PR can be marked with different status labels to represent the stat
  A proposal may only be accepted and merged after receiving approval from at least two maintainers who are not the original author of the proposal.
 
 ### Proposal Threshold
-The need for a proposal (in the form of an ADR or design document) is determined primarily by scope. Pull requests that introduce major changes — such as architectural overhauls, system-wide patterns, or significant new features — may prompt maintainers to request a proposal for further discussion and alignment.
+The need for a proposal (in the form of an ADR or design document) is determined primarily by scope. Pull requests that introduce major changes - such as architectural overhauls, system-wide patterns, or significant new features - may prompt maintainers to request a proposal for further discussion and alignment.
 
 Maintainers may comment on a PR with a request to "submit an ADR" when a change is deemed too substantial for review in isolation.
 
@@ -210,7 +210,7 @@ Smaller, self-contained changes (e.g., bug fixes, minor enhancements, or localiz
 
 ## Meetings
 
-Time zones permitting, Maintainers are expected to participate in the public developer meeting, which occurs [Community meetings](https://k3s.io/community/\#community-meetings)
+Time zones permitting, Maintainers are expected to participate in the public developer meeting, which occurs [Community meetings](https://k3s.io/community#community-meetings)
 
 Maintainers will also have closed meetings in order to discuss security reports or [Code of Conduct](https://github.com/k3s-io/k3s/blob/main/CODE_OF_CONDUCT.md) violations.  Such meetings should be scheduled by any Maintainer on receipt of a security issue or CoC report.  All current Maintainers must be invited to such closed meetings, except for any Maintainer who is accused of a CoC violation.
 
@@ -230,7 +230,7 @@ The Security Response Team is responsible for handling all reports of security h
 
 ## Modifying this Charter
 
-Changes to this Governance and its supporting documents may be approved by a [supermajority](#Supermajority) vote of the Maintainers.
+Changes to this Governance and its supporting documents may be approved by a [supermajority](#supermajority) vote of the Maintainers.
 
 ## 
 
@@ -240,4 +240,4 @@ Changes to this Governance and its supporting documents may be approved by a [su
 
 Many thanks in advance to everyone who contributes their time and effort to making K3s both a successful project as well as a successful community. The strength of our software shines in the strengths of each individual community member. Thank YOU\!
 
-Some content in this document was built(inspired) upon the work in the [Kubernetes](https://github.com/kubernetes/community), [Linkerd](https://github.com/linkerd/linkerd2/blob/main/GOVERNANCE.md), [Helm](https://github.com/helm/community/blob/main/governance), [Harbor](https://github.com/goharbor/community/blob/main/GOVERNANCE.md), [Contour](https://github.com/projectcontour/community/blob/main/GOVERNANCE.md) Communities\! KUDOs to all of them\!  
+Some content in this document was built(inspired) upon the work in the [Kubernetes](https://github.com/kubernetes/community), [Linkerd](https://github.com/linkerd/linkerd2/blob/main/GOVERNANCE.md), [Helm](https://github.com/helm/community/blob/main/governance), [Harbor](https://github.com/goharbor/community/blob/main/GOVERNANCE.md), [Contour](https://github.com/projectcontour/community/blob/main/GOVERNANCE.md) Communities\! KUDOs to all of them\!

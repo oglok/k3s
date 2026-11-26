@@ -1,5 +1,4 @@
 //go:build ctrd
-// +build ctrd
 
 /*
    Copyright The containerd Authors.
@@ -28,9 +27,15 @@ import (
 	_ "github.com/containerd/containerd/v2/plugins/imageverifier"
 	_ "github.com/containerd/containerd/v2/plugins/leases"
 	_ "github.com/containerd/containerd/v2/plugins/metadata"
+	_ "github.com/containerd/containerd/v2/plugins/mount"
+	_ "github.com/containerd/containerd/v2/plugins/mount/fsview/erofs"
 	_ "github.com/containerd/containerd/v2/plugins/nri"
 	_ "github.com/containerd/containerd/v2/plugins/restart"
 	_ "github.com/containerd/containerd/v2/plugins/sandbox"
+	_ "github.com/containerd/containerd/v2/plugins/server/debug"
+	_ "github.com/containerd/containerd/v2/plugins/server/grpc"
+	_ "github.com/containerd/containerd/v2/plugins/server/metrics"
+	_ "github.com/containerd/containerd/v2/plugins/server/ttrpc"
 	_ "github.com/containerd/containerd/v2/plugins/services/containers"
 	_ "github.com/containerd/containerd/v2/plugins/services/content"
 	_ "github.com/containerd/containerd/v2/plugins/services/diff"
@@ -39,6 +44,7 @@ import (
 	_ "github.com/containerd/containerd/v2/plugins/services/images"
 	_ "github.com/containerd/containerd/v2/plugins/services/introspection"
 	_ "github.com/containerd/containerd/v2/plugins/services/leases"
+	_ "github.com/containerd/containerd/v2/plugins/services/mounts"
 	_ "github.com/containerd/containerd/v2/plugins/services/namespaces"
 	_ "github.com/containerd/containerd/v2/plugins/services/opt"
 	_ "github.com/containerd/containerd/v2/plugins/services/sandbox"

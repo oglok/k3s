@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -22,10 +21,9 @@ import (
 	"github.com/k3s-io/k3s/pkg/daemons/config"
 	"github.com/k3s-io/k3s/pkg/daemons/control/deps"
 	"github.com/k3s-io/k3s/pkg/util"
+	"github.com/k3s-io/k3s/pkg/util/errors"
 	"github.com/k3s-io/k3s/pkg/version"
-	pkgerrors "github.com/pkg/errors"
 	certutil "github.com/rancher/dynamiclistener/cert"
-	"github.com/rancher/wrangler/v3/pkg/merr"
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/util/keyutil"
 )
@@ -33,7 +31,7 @@ import (
 func CACertReplace(control *config.Control) http.HandlerFunc {
 	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPut {
-			util.SendError(fmt.Errorf("method not allowed"), resp, req, http.StatusMethodNotAllowed)
+			util.SendError(errors.New("method not allowed"), resp, req, http.StatusMethodNotAllowed)
 			return
 		}
 		force, _ := strconv.ParseBool(req.FormValue("force"))
@@ -78,12 +76,12 @@ func caCertReplace(control *config.Control, buf io.ReadCloser, force bool) error
 	}
 
 	if err := defaultBootstrap(control, tmpControl); err != nil {
-		return pkgerrors.WithMessage(err, "failed to set default bootstrap values")
+		return errors.WithMessage(err, "failed to set default bootstrap values")
 	}
 
 	if err := validateBootstrap(control, tmpControl); err != nil {
 		if !force {
-			return pkgerrors.WithMessage(err, "failed to validate new CA certificates and keys")
+			return errors.WithMessage(err, "failed to validate new CA certificates and keys")
 		}
 		logrus.Warnf("Save of CA certificates and keys forced, ignoring validation errors: %v", err)
 	}
@@ -113,7 +111,7 @@ func defaultBootstrap(oldControl, newControl *config.Control) error {
 		newVal := newMeta.FieldByName(field.Name)
 		info, err := os.Stat(newVal.String())
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			errs = append(errs, pkgerrors.WithMessage(err, field.Name))
+			errs = append(errs, errors.WithMessage(err, field.Name))
 			continue
 		}
 
@@ -127,7 +125,7 @@ func defaultBootstrap(oldControl, newControl *config.Control) error {
 			}
 		}
 	}
-	return merr.NewErrors(errs...)
+	return errors.Join(errs...)
 }
 
 // validateBootstrap checks the new certs and keys to ensure that the cluster would function properly were they to be used.
@@ -151,24 +149,24 @@ func validateBootstrap(oldControl, newControl *config.Control) error {
 		// Check CA chain consistency and cert/key agreement
 		if strings.HasSuffix(field.Name, "CA") {
 			if err := validateCA(oldVal.String(), newVal.String()); err != nil {
-				errs = append(errs, pkgerrors.WithMessage(err, field.Name))
+				errs = append(errs, errors.WithMessage(err, field.Name))
 			}
 			newKeyVal := newMeta.FieldByName(field.Name + "Key")
 			oldKeyVal := oldMeta.FieldByName(field.Name + "Key")
 			if err := validateCAKey(oldVal.String(), oldKeyVal.String(), newVal.String(), newKeyVal.String()); err != nil {
-				errs = append(errs, pkgerrors.WithMessage(err, field.Name+"Key"))
+				errs = append(errs, errors.WithMessage(err, field.Name+"Key"))
 			}
 		}
 
 		// Check signing key rotation
 		if field.Name == "ServiceKey" {
 			if err := validateServiceKey(oldVal.String(), newVal.String()); err != nil {
-				errs = append(errs, pkgerrors.WithMessage(err, field.Name))
+				errs = append(errs, errors.WithMessage(err, field.Name))
 			}
 		}
 	}
 
-	return merr.NewErrors(errs...)
+	return errors.Join(errs...)
 }
 
 func validateCA(oldCAPath, newCAPath string) error {
@@ -215,7 +213,7 @@ func validateCA(oldCAPath, newCAPath string) error {
 	// Verify the first cert in the bundle, using the combined roots and intermediates
 	_, err = newCerts[0].Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates})
 	if err != nil {
-		err = pkgerrors.WithMessage(err, "new CA cert cannot be verified using old CA chain")
+		err = errors.WithMessage(err, "new CA cert cannot be verified using old CA chain")
 	}
 	return err
 }
@@ -229,7 +227,7 @@ func validateCAKey(oldCAPath, oldCAKeyPath, newCAPath, newCAKeyPath string) erro
 
 	_, err := tls.LoadX509KeyPair(newCAPath, newCAKeyPath)
 	if err != nil {
-		err = pkgerrors.WithMessage(err, "new CA cert and key cannot be loaded as X590KeyPair")
+		err = errors.WithMessage(err, "new CA cert and key cannot be loaded as X590KeyPair")
 	}
 	return err
 }

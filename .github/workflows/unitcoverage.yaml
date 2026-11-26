@@ -1,6 +1,9 @@
 name: Unit Test Coverage
 on:
   push:
+    branches:
+      - "main"
+      - "release-*"
     paths-ignore:
       - "**.md"
       - "channel.yaml"
@@ -32,7 +35,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         fetch-depth: 1
     - name: Install Go
@@ -41,13 +44,8 @@ jobs:
       run: |
         go test -coverpkg ./pkg/... -coverprofile coverage.out ./pkg/... -run Unit
         go tool cover -func coverage.out
-    - name: On Failure, Launch Debug Session
-      if: ${{ failure() }}
-      uses: lhotari/action-upterm@v1
-      with:
-        wait-timeout-minutes: 5
     - name: Upload Results To Codecov
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.out
@@ -59,7 +57,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         fetch-depth: 1
     - name: Install Go
@@ -69,7 +67,7 @@ jobs:
         go test -coverpkg ./pkg/... -coverprofile coverage.out ./pkg/... -run Unit
         go tool cover -func coverage.out
     - name: Upload Results To Codecov
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.out
@@ -80,7 +78,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
     - name: Build test-mods
       run: docker build --target test-mods -t k3s:mod -f Dockerfile.test .
     - name: Run test-mods

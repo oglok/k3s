@@ -17,10 +17,45 @@ The main usage of Updatecli is for:
 * Bumping versions in unstructured formats, e.g., environment variables in Dockerfiles and by matching regular expressions.
 * Scripting the automation process, e.g., update package A in repo B after package X in repo Y matches a pre-defined version criteria.
 
+The Flannel pipeline updates `github.com/flannel-io/flannel` to the latest stable
+release on every branch configured in `.github/workflows/updatecli.yaml`,
+including release branches. It uses `run-go-mod-update.sh` to update `go.mod`
+and `go.sum` with `go get` and `go mod tidy`.
+
 ### Not in scope
 
 * Updatecli will only open a pull request in the targeted repo. It's not responsible for approving and merging the PR.
 * The resulting PR must still follow the rules of the targeted repo, e.g., passing checks, QA testing, review process etc.
+
+## Pull request grouping
+
+Manifests in `updatecli.d` are grouped by a shared top-level `pipelineid`.
+Updatecli derives the working branch from the target branch and the pipeline
+ID (`updatecli_<branch>_<pipelineid>`), so every daily run opens or updates a
+single pull request per group and target branch instead of one pull request
+per dependency and branch.
+
+| `pipelineid` | Manifests | Pull request title |
+|---|---|---|
+| `k3s-io` | klipper-lb, klipper-helm-and-controller, updatek3sroot | `[<branch>] Bump k3s-io images` |
+| `addons` | coredns, metrics-server, local-path-provisioner, traefik | `[<branch>] Bump packaged components` |
+| `other` | flannel, golang-alpine | `[<branch>] Bump other dependencies` |
+
+When adding a new manifest to `updatecli.d`:
+
+* Set `pipelineid` to the group the dependency belongs to.
+* Use the same `github/pullrequest` action settings as the other manifests in
+  that group, including the exact title. Updatecli rewrites the title of an
+  existing pull request on every pipeline, so a different title would make
+  the pull request title flap.
+* Give each target a short `name` that includes the new version, e.g.
+  `'Bump Foo image to {{ source "foo" }}'`. Updatecli uses the target name as
+  the commit title (`commitmessage.title` is deprecated and ignored), so each
+  bump stays a distinct, identifiable commit in the grouped pull request.
+
+Trade-off: a single failing bump blocks its group's pull request. To ship
+the remaining bumps, revert the offending commit on the pull request branch (or
+fix it there) before merging.
 
 ## Project organization
 
@@ -58,4 +93,3 @@ updatecli diff --clean --config updatecli/updatecli.d/ --values updatecli/values
 Everyone is free to contribute with new manifests and pipelines for security version bumps targeting Rancher owned repos.
 
 Before contributing, please follow the guidelines provided in this readme and make sure to test locally your changes before opening a PR.
-

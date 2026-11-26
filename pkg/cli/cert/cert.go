@@ -3,7 +3,6 @@ package cert
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,10 +22,10 @@ import (
 	"github.com/k3s-io/k3s/pkg/proctitle"
 	"github.com/k3s-io/k3s/pkg/server"
 	k3sutil "github.com/k3s-io/k3s/pkg/util"
+	"github.com/k3s-io/k3s/pkg/util/errors"
 	"github.com/k3s-io/k3s/pkg/util/services"
 	"github.com/k3s-io/k3s/pkg/version"
 	"github.com/otiai10/copy"
-	pkgerrors "github.com/pkg/errors"
 	certutil "github.com/rancher/dynamiclistener/cert"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
@@ -51,12 +50,12 @@ type CertificateInfo struct {
 }
 
 // collectCertInfo collects information about certificates
-func collectCertInfo(controlConfig config.Control, ServicesList []string) (*CertificateInfo, error) {
+func collectCertInfo(controlConfig config.Control, servicesList []string) (*CertificateInfo, error) {
 	result := &CertificateInfo{}
 	now := time.Now()
 	warn := now.Add(time.Hour * 24 * config.CertificateRenewDays)
 
-	fileMap, err := services.FilesForServices(controlConfig, ServicesList)
+	fileMap, err := services.FilesForServices(controlConfig, servicesList)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +69,6 @@ func collectCertInfo(controlConfig config.Control, ServicesList []string) (*Cert
 			}
 
 			for _, cert := range certs {
-
 				expiration := cert.NotAfter
 				status := k3sutil.GetCertStatus(cert, now, warn)
 				if status == k3sutil.CertStatusNotYetValid {
@@ -93,8 +91,8 @@ func collectCertInfo(controlConfig config.Control, ServicesList []string) (*Cert
 	return result, nil
 }
 
-// CertFormatter defines the interface for formatting certificate information
-type CertFormatter interface {
+// Formatter defines the interface for formatting certificate information
+type Formatter interface {
 	Format(*CertificateInfo) error
 }
 
@@ -134,8 +132,8 @@ func (f *TableFormatter) Format(certInfo *CertificateInfo) error {
 	now := certInfo.ReferenceTime
 	defer w.Flush()
 
-	fmt.Fprintf(w, "\nFILENAME\tSUBJECT\tUSAGES\tEXPIRES\tRESIDUAL TIME\tSTATUS\n")
-	fmt.Fprintf(w, "--------\t-------\t------\t-------\t-------------\t------\n")
+	fmt.Fprint(w, "\nFILENAME\tSUBJECT\tUSAGES\tEXPIRES\tRESIDUAL TIME\tSTATUS\n")
+	fmt.Fprint(w, "--------\t-------\t------\t-------\t-------------\t------\n")
 
 	for _, cert := range certInfo.Certificates {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
@@ -233,7 +231,7 @@ func check(app *cli.Context, cfg *cmds.Server) error {
 	}
 	outFmt := app.String("output")
 
-	var formatter CertFormatter
+	var formatter Formatter
 	switch outFmt {
 	case "text":
 		formatter = &TextFormatter{Writer: os.Stdout}
@@ -402,7 +400,7 @@ func rotateCA(app *cli.Context, cfg *cmds.Server, sync *cmds.CertRotateCA) error
 
 	url := fmt.Sprintf("/v1-%s/cert/cacerts?force=%t", version.Program, sync.Force)
 	if err = info.Put(url, buf.Bytes()); err != nil {
-		return pkgerrors.WithMessage(err, "see server log for details")
+		return errors.WithMessage(err, "see server log for details")
 	}
 
 	fmt.Println("certificates saved to datastore")

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -34,8 +33,8 @@ import (
 	"github.com/k3s-io/k3s/pkg/signals"
 	"github.com/k3s-io/k3s/pkg/spegel"
 	"github.com/k3s-io/k3s/pkg/util"
+	"github.com/k3s-io/k3s/pkg/util/errors"
 	"github.com/k3s-io/k3s/pkg/version"
-	pkgerrors "github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -56,20 +55,20 @@ import (
 func run(ctx context.Context, cfg cmds.Agent, proxy proxy.Proxy) error {
 	nodeConfig, err := config.Get(ctx, cfg, proxy)
 	if err != nil {
-		return pkgerrors.WithMessage(err, "failed to retrieve agent configuration")
+		return errors.WithMessage(err, "failed to retrieve agent configuration")
 	}
 
 	dualCluster, err := utilsnet.IsDualStackCIDRs(nodeConfig.AgentConfig.ClusterCIDRs)
 	if err != nil {
-		return pkgerrors.WithMessage(err, "failed to validate cluster-cidr")
+		return errors.WithMessage(err, "failed to validate cluster-cidr")
 	}
 	dualService, err := utilsnet.IsDualStackCIDRs(nodeConfig.AgentConfig.ServiceCIDRs)
 	if err != nil {
-		return pkgerrors.WithMessage(err, "failed to validate service-cidr")
+		return errors.WithMessage(err, "failed to validate service-cidr")
 	}
 	dualNode, err := utilsnet.IsDualStackIPs(nodeConfig.AgentConfig.NodeIPs)
 	if err != nil {
-		return pkgerrors.WithMessage(err, "failed to validate node-ip")
+		return errors.WithMessage(err, "failed to validate node-ip")
 	}
 	serviceIPv4 := utilsnet.IsIPv4CIDR(nodeConfig.AgentConfig.ServiceCIDR)
 	clusterIPv4 := utilsnet.IsIPv4CIDR(nodeConfig.AgentConfig.ClusterCIDR)
@@ -93,14 +92,21 @@ func run(ctx context.Context, cfg cmds.Agent, proxy proxy.Proxy) error {
 
 	// dualStack or IPv6 are not supported on Windows node
 	if (goruntime.GOOS == "windows") && enableIPv6 {
-		return fmt.Errorf("dual-stack or IPv6 are not supported on Windows node")
+		return errors.New("dual-stack or IPv6 are not supported on Windows node")
 	}
 
 	conntrackConfig, err := getConntrackConfig(nodeConfig)
 	if err != nil {
-		return pkgerrors.WithMessage(err, "failed to validate kube-proxy conntrack configuration")
+		return errors.WithMessage(err, "failed to validate kube-proxy conntrack configuration")
 	}
-	syssetup.Configure(enableIPv6, conntrackConfig)
+	// The net/bridge/bridge-nf-call-{ip,ip6}tables sysctls are only required by kube-proxy
+	// and flannel. When both are disabled the node is using an alternative CNI, so leave
+	// these sysctls untouched for the administrator to manage. See
+	// https://github.com/k3s-io/k3s/issues/14022. The flannel backend is compared against the
+	// "none" literal rather than flannel.BackendNone to avoid importing the flannel package,
+	// which registers all flannel backends via init().
+	setBridgeFilter := !config.KubeProxyDisabled(ctx, nodeConfig, proxy) || nodeConfig.Flannel.Backend != "none"
+	syssetup.Configure(enableIPv6, setBridgeFilter, conntrackConfig)
 	nodeConfig.AgentConfig.EnableIPv4 = enableIPv4
 	nodeConfig.AgentConfig.EnableIPv6 = enableIPv6
 
@@ -114,19 +120,19 @@ func run(ctx context.Context, cfg cmds.Agent, proxy proxy.Proxy) error {
 		}
 
 		if err := spegel.DefaultRegistry.Start(ctx, nodeConfig, executor.CRIReadyChan()); err != nil {
-			return pkgerrors.WithMessage(err, "failed to start embedded registry")
+			return errors.WithMessage(err, "failed to start embedded registry")
 		}
 	}
 
 	if nodeConfig.SupervisorMetrics {
 		if err := metrics.DefaultMetrics.Start(ctx, nodeConfig); err != nil {
-			return pkgerrors.WithMessage(err, "failed to serve metrics")
+			return errors.WithMessage(err, "failed to serve metrics")
 		}
 	}
 
 	if nodeConfig.EnablePProf {
 		if err := profile.DefaultProfiler.Start(ctx, nodeConfig); err != nil {
-			return pkgerrors.WithMessage(err, "failed to serve pprof")
+			return errors.WithMessage(err, "failed to serve pprof")
 		}
 	}
 
@@ -144,7 +150,7 @@ func run(ctx context.Context, cfg cmds.Agent, proxy proxy.Proxy) error {
 
 	go func() {
 		if err := startCRI(ctx, nodeConfig); err != nil {
-			signals.RequestShutdown(pkgerrors.WithMessage(err, "failed to start container runtime"))
+			signals.RequestShutdown(errors.WithMessage(err, "failed to start container runtime"))
 		}
 	}()
 
@@ -155,7 +161,7 @@ func run(ctx context.Context, cfg cmds.Agent, proxy proxy.Proxy) error {
 	go func() {
 		<-executor.APIServerReadyChan()
 		if err := startNetwork(ctx, &sync.WaitGroup{}, nodeConfig); err != nil {
-			signals.RequestShutdown(pkgerrors.WithMessage(err, "failed to start networking"))
+			signals.RequestShutdown(errors.WithMessage(err, "failed to start networking"))
 			return
 		}
 
@@ -180,9 +186,8 @@ func startCRI(ctx context.Context, nodeConfig *daemonconfig.Node) error {
 			return err
 		}
 		return executor.Containerd(ctx, nodeConfig)
-	} else {
-		return executor.CRI(ctx, nodeConfig)
 	}
+	return executor.CRI(ctx, nodeConfig)
 }
 
 // startNetwork updates the network annotations on the node and starts the CNI
@@ -226,11 +231,11 @@ func getConntrackConfig(nodeConfig *daemonconfig.Node) (*kubeproxyconfig.KubePro
 		return nil, err
 	}
 	ctConfig.MaxPerCore = &maxPerCore
-	min, err := cmd.Flags().GetInt32("conntrack-min")
+	ctMin, err := cmd.Flags().GetInt32("conntrack-min")
 	if err != nil {
 		return nil, err
 	}
-	ctConfig.Min = &min
+	ctConfig.Min = &ctMin
 	establishedTimeout, err := cmd.Flags().GetDuration("conntrack-tcp-timeout-established")
 	if err != nil {
 		return nil, err
@@ -255,7 +260,7 @@ func RunStandalone(ctx context.Context, wg *sync.WaitGroup, cfg cmds.Agent) erro
 
 	nodeConfig, err := config.Get(ctx, cfg, proxy)
 	if err != nil {
-		return pkgerrors.WithMessage(err, "failed to retrieve agent configuration")
+		return errors.WithMessage(err, "failed to retrieve agent configuration")
 	}
 
 	if err := executor.Bootstrap(ctx, nodeConfig, cfg); err != nil {
@@ -267,8 +272,10 @@ func RunStandalone(ctx context.Context, wg *sync.WaitGroup, cfg cmds.Agent) erro
 		return err
 	}
 
-	if err := tunnelSetup(ctx, nodeConfig, cfg, proxy); err != nil {
-		return err
+	if !cfg.DisableLoadBalancer {
+		if err := tunnelSetup(ctx, nodeConfig, cfg, proxy); err != nil {
+			return err
+		}
 	}
 	if err := certMonitorSetup(ctx, nodeConfig, cfg); err != nil {
 		return err
@@ -276,13 +283,13 @@ func RunStandalone(ctx context.Context, wg *sync.WaitGroup, cfg cmds.Agent) erro
 
 	if nodeConfig.SupervisorMetrics {
 		if err := metrics.DefaultMetrics.Start(ctx, nodeConfig); err != nil {
-			return pkgerrors.WithMessage(err, "failed to serve metrics")
+			return errors.WithMessage(err, "failed to serve metrics")
 		}
 	}
 
 	if nodeConfig.EnablePProf {
 		if err := profile.DefaultProfiler.Start(ctx, nodeConfig); err != nil {
-			return pkgerrors.WithMessage(err, "failed to serve pprof")
+			return errors.WithMessage(err, "failed to serve pprof")
 		}
 	}
 
@@ -323,9 +330,9 @@ func createProxyAndValidateToken(ctx context.Context, cfg *cmds.Agent) (proxy.Pr
 		return nil, err
 	}
 
-	_, nodeIPs, err := util.GetHostnameAndIPs(cfg.NodeName, cfg.NodeIP.Value())
+	_, nodeIPs, err := util.GetHostnameAndIPs(ctx, cfg.NodeName, cfg.NodeIP.Value())
 	if err != nil {
-		return nil, pkgerrors.WithMessage(err, "failed to get node name and addresses")
+		return nil, errors.WithMessage(err, "failed to get node name and addresses")
 	}
 
 	proxy, err := proxy.NewSupervisorProxy(ctx, !cfg.DisableLoadBalancer, agentDir, cfg.ServerURL, cfg.LBServerPort, utilsnet.IsIPv6(nodeIPs[0]))
@@ -389,7 +396,7 @@ func configureNode(ctx context.Context, nodeConfig *daemonconfig.Node, coreClien
 		return true, nil
 	}
 	if _, err := toolswatch.UntilWithSync(ctx, lw, &v1.Node{}, nil, condition); err != nil {
-		return pkgerrors.WithMessage(err, "failed to configure node")
+		return errors.WithMessage(err, "failed to configure node")
 	}
 	return nil
 }

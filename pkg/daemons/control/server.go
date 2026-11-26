@@ -2,13 +2,11 @@ package control
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/k3s-io/k3s/pkg/authenticator"
 	"github.com/k3s-io/k3s/pkg/cluster"
@@ -17,8 +15,8 @@ import (
 	"github.com/k3s-io/k3s/pkg/daemons/executor"
 	"github.com/k3s-io/k3s/pkg/signals"
 	"github.com/k3s-io/k3s/pkg/util"
+	"github.com/k3s-io/k3s/pkg/util/errors"
 	"github.com/k3s-io/k3s/pkg/version"
-	pkgerrors "github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	v1 "k8s.io/api/core/v1"
@@ -42,12 +40,12 @@ import (
 func Prepare(ctx context.Context, wg *sync.WaitGroup, cfg *config.Control) error {
 	logsapi.ReapplyHandling = logsapi.ReapplyHandlingIgnoreUnchanged
 	if err := prepare(ctx, wg, cfg); err != nil {
-		return pkgerrors.WithMessage(err, "preparing server")
+		return errors.WithMessage(err, "preparing server")
 	}
 
 	tunnel, err := setupTunnel(ctx, cfg)
 	if err != nil {
-		return pkgerrors.WithMessage(err, "setup tunnel server")
+		return errors.WithMessage(err, "setup tunnel server")
 	}
 	cfg.Runtime.Tunnel = tunnel
 
@@ -70,7 +68,7 @@ func Prepare(ctx context.Context, wg *sync.WaitGroup, cfg *config.Control) error
 // not disabled on this node.
 func Server(ctx context.Context, wg *sync.WaitGroup, cfg *config.Control) error {
 	if err := cfg.Cluster.Start(ctx, wg); err != nil {
-		return pkgerrors.WithMessage(err, "failed to start cluster")
+		return errors.WithMessage(err, "failed to start cluster")
 	}
 
 	// Create a new context to use for control-plane components that is
@@ -139,7 +137,6 @@ func controllerManager(ctx context.Context, cfg *config.Control) error {
 	}
 	if !cfg.DisableCCM {
 		argsMap["configure-cloud-routes"] = "false"
-		argsMap["controllers"] = argsMap["controllers"] + ",-service,-route,-cloud-node-lifecycle"
 	}
 
 	if cfg.VLevel != 0 {
@@ -178,7 +175,7 @@ func scheduler(ctx context.Context, cfg *config.Control) error {
 		argsMap["vmodule"] = cfg.VModule
 	}
 
-	args := util.GetArgs(argsMap, cfg.ExtraSchedulerAPIArgs)
+	args := util.GetArgs(argsMap, cfg.ExtraSchedulerArgs)
 
 	nodeReady := make(chan struct{})
 
@@ -194,7 +191,7 @@ func scheduler(ctx context.Context, cfg *config.Control) error {
 			logrus.Infof("Waiting for untainted node")
 			// this waits forever for an untainted node; if it returns ErrWaitTimeout the context has been cancelled, and it is not a fatal error
 			if err := waitForUntaintedNode(ctx, runtime.KubeConfigScheduler); err != nil && !errors.Is(err, wait.ErrWaitTimeout) {
-				signals.RequestShutdown(pkgerrors.WithMessage(err, "failed to wait for untained node"))
+				signals.RequestShutdown(errors.WithMessage(err, "failed to wait for untained node"))
 			}
 		}
 	}()
@@ -215,17 +212,22 @@ func apiServer(ctx context.Context, cfg *config.Control) error {
 	argsMap["cert-dir"] = certDir
 	argsMap["allow-privileged"] = "true"
 	argsMap["enable-bootstrap-token-auth"] = "true"
-	if util.ArgValue("authorization-config", cfg.ExtraAPIArgs) == "" {
+	if _, ok := util.ArgValue("authorization-config", cfg.ExtraAPIArgs); !ok {
 		argsMap["authorization-mode"] = strings.Join([]string{modes.ModeNode, modes.ModeRBAC}, ",")
 	} else {
 		logrus.Warn("Not setting kube-apiserver 'authorization-mode' flag due to user-provided 'authorization-config' file.")
 	}
-	if util.ArgValue("authentication-config", cfg.ExtraAPIArgs) == "" {
+	if _, ok := util.ArgValue("authentication-config", cfg.ExtraAPIArgs); !ok {
 		argsMap["anonymous-auth"] = "false"
 	} else {
 		logrus.Warn("Not setting kube-apiserver 'anonymous-auth' flag due to user-provided 'authentication-config' file.")
 	}
-	argsMap["service-account-signing-key-file"] = runtime.ServiceCurrentKey
+	if _, ok := util.ArgValue("service-account-signing-endpoint", cfg.ExtraAPIArgs); !ok {
+		argsMap["service-account-signing-key-file"] = runtime.ServiceCurrentKey
+		argsMap["service-account-key-file"] = runtime.ServiceKey
+	} else {
+		logrus.Warn("Not setting kube-apiserver 'service-account-signing-key-file' and 'service-account-key-file' flags due to user-provided 'service-account-signing-endpoint'.")
+	}
 	argsMap["service-cluster-ip-range"] = util.JoinIPNets(cfg.ServiceIPRanges)
 	argsMap["service-node-port-range"] = cfg.ServiceNodePortRange.String()
 	argsMap["advertise-port"] = strconv.Itoa(cfg.AdvertisePort)
@@ -244,7 +246,6 @@ func apiServer(ctx context.Context, cfg *config.Control) error {
 	}
 	argsMap["tls-cert-file"] = runtime.ServingKubeAPICert
 	argsMap["tls-private-key-file"] = runtime.ServingKubeAPIKey
-	argsMap["service-account-key-file"] = runtime.ServiceKey
 	argsMap["service-account-issuer"] = "https://kubernetes.default.svc." + cfg.ClusterDomain
 	argsMap["api-audiences"] = "https://kubernetes.default.svc." + cfg.ClusterDomain + "," + version.Program
 	argsMap["kubelet-certificate-authority"] = runtime.ServerCA
@@ -311,12 +312,12 @@ func prepare(ctx context.Context, wg *sync.WaitGroup, config *config.Control) er
 		return err
 	}
 
-	if dataDir, err := filepath.Abs(config.DataDir); err != nil {
+	dataDir, err := filepath.Abs(config.DataDir)
+	if err != nil {
 		return err
-	} else {
-		config.DataDir = dataDir
 	}
 
+	config.DataDir = dataDir
 	os.MkdirAll(filepath.Join(config.DataDir, "etc"), 0700)
 	os.MkdirAll(filepath.Join(config.DataDir, "tls"), 0700)
 	os.MkdirAll(filepath.Join(config.DataDir, "cred"), 0700)
@@ -325,15 +326,15 @@ func prepare(ctx context.Context, wg *sync.WaitGroup, config *config.Control) er
 
 	config.Cluster = cluster.New(config)
 	if err := config.Cluster.Bootstrap(ctx, config.ClusterReset); err != nil {
-		return pkgerrors.WithMessage(err, "failed to bootstrap cluster data")
+		return errors.WithMessage(err, "failed to bootstrap cluster data")
 	}
 
 	if err := deps.GenServerDeps(config); err != nil {
-		return pkgerrors.WithMessage(err, "failed to generate server dependencies")
+		return errors.WithMessage(err, "failed to generate server dependencies")
 	}
 
 	if err := config.Cluster.ListenAndServe(ctx); err != nil {
-		return pkgerrors.WithMessage(err, "failed to start supervisor listener")
+		return errors.WithMessage(err, "failed to start supervisor listener")
 	}
 
 	return nil
@@ -402,36 +403,40 @@ func cloudControllerManager(ctx context.Context, cfg *config.Control) error {
 
 		<-executor.APIServerReadyChan()
 
-		logrus.Infof("Waiting for cloud-controller-manager privileges to become available")
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case err := <-promise(func() error { return checkForCloudControllerPrivileges(ctx, cfg.Runtime, 5*time.Second) }):
-				if err != nil {
-					logrus.Infof("Waiting for cloud-controller-manager privileges to become available: %v", err)
-					continue
-				}
-				return
-			}
+		if err := checkForCloudControllerPrivileges(ctx, cfg.Runtime); err != nil {
+			signals.RequestShutdown(errors.WithMessage(err, "failed to wait for cloud-controller-manager RBAC"))
 		}
 	}()
-
 	return executor.CloudControllerManager(ctx, ccmRBACReady, args)
 }
 
 // checkForCloudControllerPrivileges makes a SubjectAccessReview request to the apiserver
 // to validate that the embedded cloud controller manager has the required privileges,
-// and does not return until the requested access is granted.
+// and does not return until the requested access is granted. Both the K3s RBAC, and the
+// core extension-apiserver-authentication-reader RBAC, are checked.
 // If the CCM RBAC changes, the ResourceAttributes checked for by this function should
 // be modified to check for the most recently added privilege.
-func checkForCloudControllerPrivileges(ctx context.Context, runtime *config.ControlRuntime, timeout time.Duration) error {
-	return util.WaitForRBACReady(ctx, runtime.KubeConfigSupervisor, timeout, authorizationv1.ResourceAttributes{
-		Namespace: metav1.NamespaceSystem,
-		Verb:      "watch",
-		Resource:  "endpointslices",
-		Group:     "discovery.k8s.io",
-	}, version.Program+"-cloud-controller-manager")
+func checkForCloudControllerPrivileges(ctx context.Context, runtime *config.ControlRuntime) error {
+	ras := []authorizationv1.ResourceAttributes{
+		{
+			Namespace: metav1.NamespaceSystem,
+			Verb:      "get",
+			Resource:  "configmaps",
+			Name:      "extension-apiserver-authentication",
+		},
+		{
+			Namespace: metav1.NamespaceSystem,
+			Verb:      "watch",
+			Resource:  "endpointslices",
+			Group:     "discovery.k8s.io",
+		},
+	}
+	for _, ra := range ras {
+		if err := util.WaitForRBACReady(ctx, runtime.KubeConfigSupervisor, util.DefaultAPIServerReadyTimeout, ra, version.Program+"-cloud-controller-manager"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func waitForAPIServerHandlers(ctx context.Context, runtime *config.ControlRuntime) {
@@ -441,15 +446,6 @@ func waitForAPIServerHandlers(ctx context.Context, runtime *config.ControlRuntim
 	}
 	runtime.Authenticator = authenticator.Combine(runtime.Authenticator, auth)
 	runtime.APIServer = handler
-}
-
-func promise(f func() error) <-chan error {
-	c := make(chan error, 1)
-	go func() {
-		c <- f()
-		close(c)
-	}()
-	return c
 }
 
 // waitForUntaintedNode watches nodes, waiting to find one not tainted as
@@ -470,7 +466,7 @@ func waitForUntaintedNode(ctx context.Context, kubeConfig string) error {
 	}
 
 	if _, err := toolswatch.UntilWithSync(ctx, lw, &v1.Node{}, nil, condition); err != nil {
-		return pkgerrors.WithMessage(err, "failed to wait for untainted node")
+		return errors.WithMessage(err, "failed to wait for untainted node")
 	}
 	return nil
 }

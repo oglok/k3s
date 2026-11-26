@@ -66,7 +66,7 @@ spec:
         kubernetes.io/os: linux
       containers:
       - name: local-path-provisioner
-        image: "%{SYSTEM_DEFAULT_REGISTRY}%rancher/local-path-provisioner:v0.0.32"
+        image: "%{SYSTEM_DEFAULT_REGISTRY}%rancher/local-path-provisioner:v0.0.37"
         imagePullPolicy: IfNotPresent
         command:
         - local-path-provisioner
@@ -81,6 +81,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: CONFIG_MOUNT_PATH
+          value: /etc/config/
       volumes:
         - name: config-volume
           configMap:
@@ -129,5 +131,8 @@ data:
     spec:
       containers:
       - name: helper-pod
-        image: "%{SYSTEM_DEFAULT_REGISTRY}%rancher/mirrored-library-busybox:1.37.0"
+        image: "%{SYSTEM_DEFAULT_REGISTRY}%rancher/mirrored-library-busybox:1.38.0"
         imagePullPolicy: IfNotPresent
+        securityContext:
+          seLinuxOptions:
+            level: s0-s0:c0.c1023
